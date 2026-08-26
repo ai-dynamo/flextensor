@@ -157,6 +157,26 @@ def shard_sequence_or_broadcast(
     return shard_sequence(tensor, dim, size, rank)
 
 
+def shard_sequence_if_full(
+    tensor: torch.Tensor | None,
+    dim: int,
+    size: int,
+    rank: int,
+    full_length: int,
+) -> torch.Tensor | None:
+    """Shard only a tensor still at full sequence length.
+
+    ``_install_sharded_adaln`` pre-shards some per-token tensors in the preprocessor, so a blind
+    second shard here would slice an already-sliced tensor. Comparing against the full token count
+    keeps this correct whether or not that optimization is installed.
+    """
+    if tensor is None or tensor.shape[dim] == 1:
+        return tensor
+    if tensor.shape[dim] != full_length:
+        return tensor
+    return shard_sequence(tensor, dim, size, rank)
+
+
 def _video_latent_token_count(*, frames: int, height: int, width: int) -> int:
     """Mirror ``VideoLatentShape.from_pixel_shape(...).token_count()`` without importing LTX."""
     if frames < 1 or height < 1 or width < 1:
@@ -710,13 +730,16 @@ class GatherKeyValueAttention:
 _PATCHED_RUNTIME: ContextParallelRuntime | None = None
 
 
-def _install_process_blocks_patch(runtime: ContextParallelRuntime) -> None:
+def _install_process_blocks_patch(runtime: ContextParallelRuntime, *, gather_after_blocks: bool) -> None:
     global _PATCHED_RUNTIME
 
     from ltx_core.model.transformer.model import LTXModel
 
     if _PATCHED_RUNTIME is not None:
-        if (_PATCHED_RUNTIME.size, _PATCHED_RUNTIME.rank) != (runtime.size, runtime.rank):
+        if (_PATCHED_RUNTIME.size, _PATCHED_RUNTIME.rank) != (
+            runtime.size,
+            runtime.rank,
+        ):
             raise RuntimeError("LTX context parallelism was already installed with a different runtime.")
         return
 
@@ -732,10 +755,11 @@ def _install_process_blocks_patch(runtime: ContextParallelRuntime) -> None:
         full_embedded_timestep = None
         if video is not None:
             full_embedded_timestep = video.embedded_timestep
+            full_tokens = video.x.shape[1]
             video = replace(
                 video,
                 x=shard_sequence(video.x, 1, runtime.size, runtime.rank),
-                timesteps=shard_sequence_or_broadcast(video.timesteps, 1, runtime.size, runtime.rank),
+                timesteps=shard_sequence_if_full(video.timesteps, 1, runtime.size, runtime.rank, full_tokens),
                 embedded_timestep=shard_sequence_or_broadcast(
                     video.embedded_timestep,
                     1,
@@ -754,11 +778,12 @@ def _install_process_blocks_patch(runtime: ContextParallelRuntime) -> None:
                     if video.cross_positional_embeddings is not None
                     else None
                 ),
-                cross_scale_shift_timestep=shard_sequence_or_broadcast(
+                cross_scale_shift_timestep=shard_sequence_if_full(
                     video.cross_scale_shift_timestep,
                     1,
                     runtime.size,
                     runtime.rank,
+                    full_tokens,
                 ),
                 cross_gate_timestep=shard_sequence_or_broadcast(
                     video.cross_gate_timestep,
@@ -769,7 +794,9 @@ def _install_process_blocks_patch(runtime: ContextParallelRuntime) -> None:
             )
 
         video_output, audio_output = original_process_blocks(model, video, audio, perturbations)
-        if video_output is not None:
+        if video_output is not None and gather_after_blocks:
+            # No output patch installed, so the sequence has to be whole again here, and
+            # `embedded_timestep` restored to the full length `_process_output` then expects.
             runtime.ensure_usable()
             output_shards = [torch.empty_like(video_output.x) for _ in range(runtime.size)]
             dist.all_gather(output_shards, video_output.x.contiguous(), group=runtime.group)
@@ -786,8 +813,149 @@ def _install_process_blocks_patch(runtime: ContextParallelRuntime) -> None:
     _PATCHED_RUNTIME = runtime
 
 
-def install_context_parallel(transformer: torch.nn.Module, runtime: ContextParallelRuntime) -> None:
-    """Install Ulysses attention on a freshly built LTX transformer."""
+def _install_process_output_patch(runtime: ContextParallelRuntime) -> None:
+    """Gather the video sequence after ``proj_out`` rather than after the transformer blocks.
+
+    ``LTXModel._process_output`` is per-token: ``norm_out``, the ``x * (1 + scale) + shift``
+    modulation and ``proj_out`` mix nothing across the sequence. Gathering before it makes that
+    whole tail run at full sequence length on every rank, materialising the gathered ``x``, its
+    layer norm, the ``(batch, tokens, 2, inner_dim)`` scale-shift table and the modulation
+    temporaries -- all at the 4096-wide inner dimension.
+
+    Running it on the shard is cheaper per rank *and* a smaller collective: ``proj_out`` projects
+    the inner dimension down to the latent channel count first, so the gathered tensor is roughly
+    an order of magnitude smaller than the ``x`` that used to be gathered.
+    """
+    from ltx_core.model.transformer.model import LTXModel
+
+    if getattr(LTXModel, "_cp_process_output_patched", False):
+        return
+
+    original_process_output = LTXModel._process_output  # noqa: SLF001 - CP wraps LTX output handling.
+
+    @functools.wraps(original_process_output)
+    def process_output_with_context_parallel(
+        model: Any,
+        scale_shift_table: torch.Tensor,
+        norm_out: Any,
+        proj_out: Any,
+        x: torch.Tensor,
+        embedded_timestep: torch.Tensor,
+    ) -> torch.Tensor:
+        output = original_process_output(model, scale_shift_table, norm_out, proj_out, x, embedded_timestep)
+        # Video only. Audio is replicated, never sequence-sharded; identity-compare the table rather
+        # than inferring from shapes, which can coincide.
+        if scale_shift_table is model.scale_shift_table:
+            runtime.ensure_usable()
+            shards = [torch.empty_like(output) for _ in range(runtime.size)]
+            dist.all_gather(shards, output.contiguous(), group=runtime.group)
+            output = torch.cat(shards, dim=1)
+        return output
+
+    LTXModel._process_output = process_output_with_context_parallel  # noqa: SLF001
+    LTXModel._cp_process_output_patched = True  # noqa: SLF001
+
+
+def _install_sharded_adaln(transformer: torch.nn.Module, runtime: ContextParallelRuntime) -> None:
+    """Evaluate the wide AdaLN timestep projections on this rank's sequence shard.
+
+    ``TransformerArgsPreprocessor.prepare`` runs before ``_process_transformer_blocks``, i.e. before
+    any context-parallel sharding, so ``adaln.linear`` -- ``Linear(inner_dim, 6 * inner_dim)`` -- is
+    evaluated at the *full* token length on every rank. At 30 s / 1280x704 that is a single ~10.9
+    GiB allocation, and the A<->V cross-attention AdaLN adds a second ~4.9 GiB one. Together they
+    dominate peak memory before a single transformer block has run.
+
+    AdaLN is per-token with no cross-token mixing, so the projection can be computed on the local
+    shard. Both outputs are sequence-sharded by the block patch anyway, so nothing downstream
+    changes. The video AdaLN's narrow ``embedded_timestep`` is deliberately returned at full length
+    so the block patch remains the single place that shards it -- it is sharded there and
+    ``_process_output`` then runs on that shard.
+    """
+    velocity_model = getattr(transformer, "velocity_model", transformer)
+    preprocessor = getattr(velocity_model, "video_args_preprocessor", None)
+    if preprocessor is None:
+        return
+
+    # video_args_preprocessor is a MultiModalTransformerArgsPreprocessor; the per-token AdaLN lives
+    # on the TransformerArgsPreprocessor it delegates to.
+    simple = getattr(preprocessor, "simple_preprocessor", preprocessor)
+    if hasattr(simple, "_prepare_timestep") and not getattr(simple, "_cp_adaln_sharded", False):
+        original_prepare_timestep = simple._prepare_timestep  # noqa: SLF001
+
+        def prepare_timestep_sharded(timestep, adaln, batch_size, hidden_dtype):
+            if adaln is not getattr(simple, "adaln", None):
+                return original_prepare_timestep(timestep, adaln, batch_size, hidden_dtype)
+            flat = (timestep * simple.timestep_scale_multiplier).flatten()
+            # shard_sequence splits dim 1 (tokens), so the guard must be on the per-sample token
+            # count, not on the flattened batch*token total -- those coincide only at batch 1, and
+            # above it a total that divides while the token count does not would reach
+            # shard_sequence and raise instead of falling back.
+            if batch_size < 1 or flat.numel() % batch_size != 0:
+                return original_prepare_timestep(timestep, adaln, batch_size, hidden_dtype)
+            tokens = flat.numel() // batch_size
+            if tokens <= 1 or tokens % runtime.size != 0:
+                return original_prepare_timestep(timestep, adaln, batch_size, hidden_dtype)
+            embedded = adaln.emb(flat, hidden_dtype=hidden_dtype)
+            embedded = embedded.view(batch_size, -1, embedded.shape[-1])
+            shard = shard_sequence(embedded, 1, runtime.size, runtime.rank)
+            return adaln.linear(adaln.silu(shard)), embedded
+
+        simple._prepare_timestep = prepare_timestep_sharded  # noqa: SLF001
+        simple._cp_adaln_sharded = True  # noqa: SLF001
+
+    if hasattr(preprocessor, "_prepare_cross_attention_timestep") and not getattr(
+        preprocessor, "_cp_cross_adaln_sharded", False
+    ):
+
+        def prepare_cross_attention_timestep_sharded(
+            modality_timesteps,
+            cross_modality_sigma,
+            timestep_scale_multiplier,
+            batch_size,
+            hidden_dtype,
+        ):
+            av_factor = preprocessor.av_ca_timestep_scale_multiplier / timestep_scale_multiplier
+            flat = (modality_timesteps * timestep_scale_multiplier).flatten()
+            # Same per-sample token guard as above.
+            tokens = flat.numel() // batch_size if batch_size >= 1 and flat.numel() % batch_size == 0 else 0
+            if tokens > 1 and tokens % runtime.size == 0:
+                # This one's embedding is discarded upstream, so shard before it too.
+                flat = shard_sequence(flat.view(batch_size, -1), 1, runtime.size, runtime.rank).flatten()
+            scale_shift, _ = preprocessor.cross_scale_shift_adaln(flat, hidden_dtype=hidden_dtype)
+            scale_shift = scale_shift.view(batch_size, -1, scale_shift.shape[-1])
+            # The gate comes from the audio sigma; audio is not sequence-sharded.
+            gate, _ = preprocessor.cross_gate_adaln(
+                (cross_modality_sigma * timestep_scale_multiplier * av_factor).flatten(),
+                hidden_dtype=hidden_dtype,
+            )
+            gate = gate.view(batch_size, -1, gate.shape[-1])
+            return scale_shift, gate
+
+        preprocessor._prepare_cross_attention_timestep = (  # noqa: SLF001
+            prepare_cross_attention_timestep_sharded
+        )
+        preprocessor._cp_cross_adaln_sharded = True  # noqa: SLF001
+
+
+def install_context_parallel(
+    transformer: torch.nn.Module,
+    runtime: ContextParallelRuntime,
+    *,
+    shard_adaln: bool = True,
+    shard_output: bool = False,
+) -> None:
+    """Install Ulysses attention on a freshly built LTX transformer.
+
+    :param shard_adaln: evaluate the AdaLN timestep projections on the local shard. Bit-exact
+        (identical output md5), so it is on by default -- it only reduces how many rows each rank
+        computes a per-token operation over.
+    :param shard_output: gather after ``proj_out`` rather than after the transformer blocks. Saves
+        further peak memory and is what makes a 30 s clip fit on a 40 GB card, but it is **not**
+        bit-exact: handing ``proj_out``'s GEMM a shard rather than the full sequence lets cuBLAS
+        pick a different kernel and accumulate bf16 differently (cosine ~0.9989 against the
+        unmodified path). Off by default so serving numerics do not change silently; enable it
+        when the memory is needed.
+    """
     if not runtime.enabled:
         return
 
@@ -807,6 +975,16 @@ def install_context_parallel(transformer: torch.nn.Module, runtime: ContextParal
             block.video_to_audio_attn.attention_function = gather_key_value_attention
             block.video_to_audio_attn.masked_attention_function = gather_key_value_attention
 
-    _install_process_blocks_patch(runtime)
+    if shard_adaln:
+        _install_sharded_adaln(transformer, runtime)
+    # Exactly one of the two must gather the sequence back: the blocks patch, or the output patch
+    # after `proj_out`. Gathering in neither leaves a sharded latent; gathering in both is wasted
+    # traffic on an already-whole tensor.
+    _install_process_blocks_patch(runtime, gather_after_blocks=not shard_output)
+    if shard_output:
+        _install_process_output_patch(runtime)
     if runtime.is_leader:
-        LOGGER.info("Installed Ulysses context parallelism on %s LTX transformer blocks", block_count)
+        LOGGER.info(
+            "Installed Ulysses context parallelism on %s LTX transformer blocks",
+            block_count,
+        )

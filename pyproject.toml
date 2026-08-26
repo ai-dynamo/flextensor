@@ -268,6 +268,15 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # Ignore unused imports in __init__.py files that are used for exporting the public API
 "examples/**/*.py" = ["T201"]  # runnable examples print progress/results to stdout by design
+# Vendored benchmark driver. Committed as it was run so the published numbers correspond to this
+# exact file; reformatting it would mean the artifact in the repository is no longer the artifact
+# that was measured. It monkey-patches LTX internals by design (SLF001), imports after distributed
+# init because rank/device must be set first (E402), and mirrors upstream's naming (N8xx).
+"examples/ltx23/outpaint/benchmarks/integrated_e2e.py" = [
+    "RUF052", "SLF001", "E402", "E501", "N802", "N803", "N805", "N806", "N812", "N814",
+    "S110", "PTH103", "PTH207", "SIM105", "SIM108", "C408", "C901", "UP031", "ERA001",
+    "RUF012", "RUF046",
+]
 "tests/**/*.py" = [
     "BLE001",  # broad Exception allowed for transient OS/IPC failures
     "RUF100",  # do not remove "unused" noqa (e.g. BLE001) so intent comments stay
