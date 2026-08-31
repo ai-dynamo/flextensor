@@ -398,11 +398,11 @@ def _create_tiled_video_conditionings(
     """Build IC-LoRA conditionings using a tiled VAE encode.
 
     ``ICLoraPipeline._create_conditionings`` hard-codes ``tiling_config=None``,
-    so the VAE encodes the reference video in a single pass.  At Stage 2 full
-    resolution that single ``conv_in`` conv3d needs tens of GiB and OOMs.  This
-    mirrors ``_create_conditionings`` but forwards a real ``tiling_config`` so the
-    reference video is routed through ``VideoEncoder.tiled_encode`` and encoded
-    tile-by-tile instead.
+    so the VAE encodes the Stage 1 reference video in a single pass. At Stage 2,
+    upstream omits the reference video entirely. This helper is shared by the
+    patched paths for both stages and forwards a real ``tiling_config`` so long
+    references are routed through ``VideoEncoder.tiled_encode`` instead of an
+    OOM-prone full-clip encode.
     """
     conditionings = combined_image_conditionings(
         images=images,
@@ -430,15 +430,16 @@ def _create_tiled_video_conditionings(
     return conditionings
 
 
-def install_stage2_video_conditioning_patch() -> None:
-    """Patch ICLoraPipeline so Stage 2 also sees the full video conditioning.
+def install_video_conditioning_patch() -> None:
+    """Patch ICLoraPipeline so both stages use tiled full-video conditioning.
 
     Upstream LTX 2.3 IC-LoRA only applies ``video_conditioning`` in Stage 1.  For
     outpaint, the black-mask reference video is the source of truth for every
     frame, so Stage 2 must receive the same video conditioning rather than
-    refining only from the Stage 1 latent.
+    refining only from the Stage 1 latent. The replacement also tiles Stage 1's
+    conditioning encode because the upstream helper forces an untiled encode.
     """
-    if getattr(ICLoraPipeline.__call__, "_flextensor_stage2_video_conditioning", False):
+    if getattr(ICLoraPipeline.__call__, "_flextensor_video_conditioning", False):
         return
 
     def patched_call(
@@ -479,8 +480,14 @@ def install_stage2_video_conditioning_patch() -> None:
             height=height // 2,
             fps=frame_rate,
         )
+        # Apply the same VAE tiling to both conditioning encodes. The upstream
+        # Stage 1 helper hard-codes ``tiling_config=None``; leaving it untiled
+        # makes long requests hit an avoidable conditioning-encode OOM before
+        # the execution strategy under test is measured.
+        conditioning_tiling_config = tiling_config if tiling_config is not None else TilingConfig.default()
         stage_1_conditionings = self.image_conditioner(
-            lambda enc: self._create_conditionings(
+            lambda enc: _create_tiled_video_conditionings(
+                self,
                 images=images,
                 video_conditioning=video_conditioning,
                 height=stage_1_output_shape.height,
@@ -489,6 +496,7 @@ def install_stage2_video_conditioning_patch() -> None:
                 num_frames=num_frames,
                 conditioning_attention_strength=1.0,
                 conditioning_attention_mask=None,
+                tiling_config=conditioning_tiling_config,
             )
         )
 
@@ -520,13 +528,13 @@ def install_stage2_video_conditioning_patch() -> None:
         stage_2_output_shape = VideoPixelShape(batch=1, frames=num_frames, width=width, height=height, fps=frame_rate)
         # Stage 2 runs at full resolution, so encode the reference video with VAE
         # tiling to avoid a single multi-tens-of-GiB conv3d activation (OOM).
-        stage_2_tiling_config = tiling_config or TilingConfig.default()
         # No per-region attention mask in Stage 2: a conditioning attention mask
         # forces ``build_attention_mask`` to allocate a dense (B, T, T) self-attention
         # bias over the full-resolution sequence (generation + reference tokens),
         # which is hundreds of GiB and OOMs. Both the tensor and scalar mask paths
-        # build the same dense tensor, so we drop masking here and condition Stage 2
-        # on the reference video at full strength (Stage 1 still applies the mask).
+        # build the same dense tensor, so this outpaint patch uses no per-region
+        # attention mask in either stage and conditions on the reference video at
+        # full attention strength.
         stage_2_conditionings = self.image_conditioner(
             lambda enc: _create_tiled_video_conditionings(
                 self,
@@ -538,7 +546,7 @@ def install_stage2_video_conditioning_patch() -> None:
                 num_frames=num_frames,
                 conditioning_attention_strength=1.0,
                 conditioning_attention_mask=None,
-                tiling_config=stage_2_tiling_config,
+                tiling_config=conditioning_tiling_config,
             )
         )
 
@@ -571,7 +579,7 @@ def install_stage2_video_conditioning_patch() -> None:
         decoded_audio = self.audio_decoder(audio_state.latent)
         return decoded_video, decoded_audio
 
-    patched_call._flextensor_stage2_video_conditioning = True  # noqa: SLF001
+    patched_call._flextensor_video_conditioning = True  # noqa: SLF001
     ICLoraPipeline.__call__ = patched_call  # type: ignore[method-assign]
 
 
@@ -655,7 +663,7 @@ class OutpaintFlexTensorService:
         self.cache.install()
         self.request_lock = Lock()
         self.request_id = 0
-        install_stage2_video_conditioning_patch()
+        install_video_conditioning_patch()
         install_stage2_lora_patch()
         self.pipeline = ICLoraPipeline(
             distilled_checkpoint_path=args.distilled_checkpoint_path,

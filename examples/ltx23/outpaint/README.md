@@ -92,13 +92,14 @@ flowchart TD
     stage1 --> upsample["Spatial upsampler"]
     upsample --> stage2["DiffusionStage stage 2"]
     prompt --> stage2
+    videoCond --> stage2
     stage2 --> decode["Video/audio decode"]
     decode --> output["MP4 output"]
 ```
 
 ## FlexTensor Serving Architecture
 
-This example keeps the original LTX pipeline structure and only changes how the two diffusion transformers are constructed and cached. IC-LoRA video conditioning, spatial upsampling, and video/audio decoding still run through the official LTX pipeline components and are not wrapped by FlexTensor. Gemma prompt encoding also runs through the official component by default, and is only wrapped by FlexTensor when `--offload-text` is passed (see [Optional: Gemma text-encoder offload](#optional-gemma-text-encoder-offload)).
+This example keeps the original LTX pipeline components while patching two pieces of pipeline wiring needed by outpaint: Stage 2 receives the same IC-LoRA and full-video conditioning as Stage 1, and both reference-video VAE encodes use tiling so long clips do not require a single full-clip activation. IC-LoRA video conditioning, spatial upsampling, and video/audio decoding still run through the official LTX components and are not wrapped by FlexTensor. Gemma prompt encoding also runs through the official component by default, and is only wrapped by FlexTensor when `--offload-text` is passed (see [Optional: Gemma text-encoder offload](#optional-gemma-text-encoder-offload)).
 
 The key serving difference is lifecycle: FlexTensor initialization and profile loading happen once during server startup, not once per request. Requests reuse the cached FlexTensor-managed `stage1` and `stage2` transformers. Building both LTX transformers and restoring their FlexTensor profile is expensive; doing it per request would hide the benefit of weight streaming behind startup cost. Keeping the managed transformers resident gives request latency that reflects prompt/conditioning, denoising, upsampling, and decode work rather than model/profile construction.
 

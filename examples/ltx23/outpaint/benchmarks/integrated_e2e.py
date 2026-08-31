@@ -779,7 +779,7 @@ from ltx_pipelines.ic_lora import ICLoraPipeline
 from ltx_pipelines.utils.blocks import DiffusionStage
 from ltx_pipelines.utils.media_io import encode_video
 
-si.install_stage2_video_conditioning_patch()
+si.install_video_conditioning_patch()
 si.install_stage2_lora_patch()
 
 # stage-1 reference encode hardcodes tiling_config=None -> untiled full-clip VAE encode OOMs at
