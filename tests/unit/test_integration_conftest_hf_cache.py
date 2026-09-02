@@ -15,7 +15,12 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-pytest.importorskip("huggingface_hub")
+hf_snapshot = pytest.importorskip("huggingface_hub._snapshot_download")
+try:
+    TreeCacheEntry = hf_snapshot.TreeCacheEntry
+    write_tree_cache = hf_snapshot.write_tree_cache
+except AttributeError:
+    pytest.skip("huggingface_hub does not expose tree-cache support", allow_module_level=True)
 
 from tests.integration.conftest import _REQUIRED_CACHE_FILES, enable_offline_if_cached  # noqa: E402
 
@@ -35,6 +40,16 @@ def _restore_hf_env() -> None:
             os.environ[k] = v
 
 
+@pytest.fixture(autouse=True)
+def _complete_local_snapshot(tmp_path: Path) -> None:
+    storage = tmp_path / "models--Qwen--Qwen2.5-7B-Instruct"
+    snapshot = storage / "snapshots" / "commit"
+    snapshot.mkdir(parents=True)
+    write_tree_cache(str(storage), "commit", {"config.json": TreeCacheEntry(size=1, blob_id="blob")})
+    with mock.patch("huggingface_hub.snapshot_download", return_value=str(snapshot)):
+        yield
+
+
 def test_enables_offline_when_all_required_files_are_cached(capsys: pytest.CaptureFixture[str]) -> None:
     def fake_load(_model: str, filename: str) -> str | None:
         if filename in _REQUIRED_CACHE_FILES or filename == "model.safetensors":
@@ -50,6 +65,55 @@ def test_enables_offline_when_all_required_files_are_cached(capsys: pytest.Captu
     assert os.environ["HF_HUB_OFFLINE"] == "1"
     assert os.environ["TRANSFORMERS_OFFLINE"] == "1"
     assert "fully cached" in capsys.readouterr().out
+
+
+def test_stays_online_when_huggingface_reports_incomplete_snapshot(capsys: pytest.CaptureFixture[str]) -> None:
+    from huggingface_hub.errors import IncompleteSnapshotError
+
+    with (
+        mock.patch(
+            "huggingface_hub.snapshot_download",
+            side_effect=IncompleteSnapshotError("incomplete snapshot", "/fake/snapshot"),
+        ),
+        mock.patch("huggingface_hub.try_to_load_from_cache", return_value="/fake/path"),
+    ):
+        enable_offline_if_cached(_MODEL)
+
+    assert "HF_HUB_OFFLINE" not in os.environ
+    assert "TRANSFORMERS_OFFLINE" not in os.environ
+    assert "incomplete snapshot" in capsys.readouterr().out
+
+
+def test_stays_online_when_snapshot_completeness_cannot_be_verified(capsys: pytest.CaptureFixture[str]) -> None:
+    with (
+        mock.patch("huggingface_hub.snapshot_download", return_value="/fake/snapshots/commit"),
+        mock.patch("huggingface_hub.try_to_load_from_cache", return_value="/fake/path"),
+    ):
+        enable_offline_if_cached(_MODEL)
+
+    assert "HF_HUB_OFFLINE" not in os.environ
+    assert "TRANSFORMERS_OFFLINE" not in os.environ
+    assert "cannot verify snapshot completeness" in capsys.readouterr().out
+
+
+def test_stays_online_when_snapshot_tree_manifest_is_invalid(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    storage = tmp_path / "models--Qwen--Qwen2.5-7B-Instruct"
+    snapshot = storage / "snapshots" / "invalid-commit"
+    snapshot.mkdir(parents=True)
+    tree = storage / "trees" / "invalid-commit.json"
+    tree.write_text("{}")
+
+    with (
+        mock.patch("huggingface_hub.snapshot_download", return_value=str(snapshot)),
+        mock.patch("huggingface_hub.try_to_load_from_cache", return_value="/fake/path"),
+    ):
+        enable_offline_if_cached(_MODEL)
+
+    assert "HF_HUB_OFFLINE" not in os.environ
+    assert "TRANSFORMERS_OFFLINE" not in os.environ
+    assert "cannot verify snapshot completeness" in capsys.readouterr().out
 
 
 def test_stays_online_when_any_required_file_is_missing(capsys: pytest.CaptureFixture[str]) -> None:

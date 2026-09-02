@@ -124,6 +124,7 @@ def collect_vllm_backend_evidence(
         r"(?P<family>\w+)\s+MoE backend"
         r"(?:\s+out of potential backends:\s+(?P<potential>\[[^\]]*\]))?"
     )
+    nvidia_selected_moe_re = re.compile(r"Using\s+(?P<backend>.+?)\s+backend for\s+(?P<family>\w+)\s+MoE")
     rejected_moe_re = re.compile(
         r"(?P<family>\w+)\s+MoE backend\s+"
         r"(?:'(?P<quoted_backend>[^']+)'|(?P<plain_backend>.+?))\s+does not support "
@@ -145,6 +146,13 @@ def collect_vllm_backend_evidence(
             ).strip()
             evidence["selected_moe_backend_family"] = selected_moe.group("family")
             evidence["potential_moe_backends"] = _parse_backend_list(selected_moe.group("potential") or "[]")
+            continue
+
+        nvidia_selected_moe = nvidia_selected_moe_re.search(line)
+        if nvidia_selected_moe:
+            evidence["selected_moe_backend"] = nvidia_selected_moe.group("backend").strip()
+            evidence["selected_moe_backend_family"] = nvidia_selected_moe.group("family")
+            evidence["potential_moe_backends"] = []
             continue
 
         rejected = rejected_moe_re.search(line)
