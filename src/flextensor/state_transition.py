@@ -209,12 +209,10 @@ def _validate_model_state(state: ModelPlacementState) -> None:  # noqa: C901
             raise ValueError(f"Tensor {tensor.id!r} kind must be a non-empty string")
 
     storage_ids: set[str] = set()
-    storage_by_id: dict[str, StorageState] = {}
     for storage in state.storages:
         if not isinstance(storage.id, str) or not storage.id or storage.id in storage_ids:
             raise ValueError(f"Storage IDs must be unique non-empty strings: {storage.id!r}")
         storage_ids.add(storage.id)
-        storage_by_id[storage.id] = storage
         _validate_device(storage.device)
         if not _is_non_negative_int(storage.nbytes):
             raise ValueError(f"Storage {storage.id!r} nbytes must be a non-negative integer")
@@ -229,9 +227,6 @@ def _validate_model_state(state: ModelPlacementState) -> None:  # noqa: C901
             f"missing={sorted(referenced_storage_ids - storage_ids)}, "
             f"unreferenced={sorted(storage_ids - referenced_storage_ids)}"
         )
-    for tensor in state.tensors:
-        if tensor.logical_bytes > storage_by_id[tensor.storage_id].nbytes:
-            raise ValueError(f"Tensor {tensor.id!r} logical_bytes exceeds backing storage {tensor.storage_id!r}")
 
 
 def _validate_transition_inputs(  # noqa: C901
