@@ -24,6 +24,7 @@ from torch.utils.hooks import RemovableHandle  # noqa: TC002 — beartype on @de
 
 from flextensor.benchmark_tensor_mode import PreloadToDevice
 from flextensor.compile import COMPILED_WARMUP_FORWARDS, CompiledOffload
+from flextensor.compile.module_swap import resolve_offload_units, resolve_resident_units
 from flextensor.compiled_offload import build_compiled_offload_forward
 from flextensor.compiler_utils import disable as _compiler_disable
 from flextensor.compiler_utils import (
@@ -1016,13 +1017,65 @@ class OffloadManager:
         """Return ``_ft_offload_name`` of each patched module, in patch order.
 
         Used for diagnostics / logging (e.g. loader install). Custom ops take
-        the offload-unit name directly (no index registry).
+        the offload-unit name directly (no index registry). Prefer
+        :meth:`offload_units` for the user-facing ``(name, module)`` listing.
         """
         return [
             module._ft_offload_name  # noqa: SLF001
             for module in self._patched_modules
             if hasattr(module, "_ft_offload_name")
         ]
+
+    def offload_units(self) -> tuple[tuple[str, nn.Module], ...]:
+        """Return outermost offloaded modules as ``(qualified_name, module)`` pairs.
+
+        Same set ``compile_fn`` wraps: nested patched modules are omitted so
+        each graph would read one rolling slot. Order matches patch order;
+        shared modules are identity-deduplicated (first path wins). Available
+        after :meth:`offload`; the set is stable once the manager is in
+        INFERENCE.
+
+        To ``torch.compile`` these units, enable ``external_compile=True`` (or
+        pass ``compile_fn``) and compile only after INFERENCE. Prefer
+        ``module.compile(...)`` so the object in the tree stays the same;
+        ``torch.compile(module)`` returns a new wrapper and is not written
+        back until a later replace helper exists.
+
+        Returns:
+            Immutable ``(name, module)`` pairs. Empty when no model is bound
+            or nothing was patched.
+        """
+        model = self._model
+        if model is None:
+            return ()
+        return tuple(resolve_offload_units(model, self._patched_modules))
+
+    def resident_units(self) -> tuple[tuple[str, nn.Module], ...]:
+        """Return outermost modules that are not offload units and contain none.
+
+        These subtrees stay GPU-resident at serving time and may be compiled
+        without compiled-offload custom ops. The root, containers that hold
+        offload units, registry containers without an executable ``forward``
+        (``ModuleList``, ``ModuleDict``), and children inside an offload unit
+        are omitted.
+
+        Compile only after INFERENCE: earlier phases can swap the live module
+        tree. Resident-only compile does not require ``external_compile`` or
+        :meth:`request_strategy_replan`.
+
+        Boundaries are the complement of :meth:`offload_units` live identities,
+        so a ``compile_fn`` replacement that dropped patch markers is still
+        omitted, and a second parent of a shared offload unit is not listed as
+        resident.
+
+        Returns:
+            Immutable ``(name, module)`` pairs in ``named_children`` walk
+            order, identity-deduplicated. Empty when no model is bound.
+        """
+        model = self._model
+        if model is None:
+            return ()
+        return tuple(resolve_resident_units(model, self._patched_modules))
 
     def _install_compiled_forwards(self) -> None:
         """Swap each patched module's ``forward`` to the compile-transparent variant.
@@ -2578,6 +2631,22 @@ def update_offload_timing(name: str = DEFAULT_MANAGER_NAME, *, replay_generation
     """
     om = get_offload_manager(name)
     return om.update_offload_timing(replay_generation=replay_generation)
+
+
+def offload_units(name: str = DEFAULT_MANAGER_NAME) -> tuple[tuple[str, nn.Module], ...]:
+    """Return outermost offloaded modules as ``(qualified_name, module)`` pairs.
+
+    Convenience wrapper around :meth:`OffloadManager.offload_units`.
+    """
+    return get_offload_manager(name).offload_units()
+
+
+def resident_units(name: str = DEFAULT_MANAGER_NAME) -> tuple[tuple[str, nn.Module], ...]:
+    """Return outermost GPU-resident modules as ``(qualified_name, module)`` pairs.
+
+    Convenience wrapper around :meth:`OffloadManager.resident_units`.
+    """
+    return get_offload_manager(name).resident_units()
 
 
 def request_strategy_replan(name: str = DEFAULT_MANAGER_NAME, *, manual_update_state: bool = False) -> int:

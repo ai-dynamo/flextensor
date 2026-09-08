@@ -16,6 +16,8 @@ rather than constructing one directly.
         - offload
         - offload_from_state
         - offload_block
+        - offload_units
+        - resident_units
         - get_gpu_memory_usage
         - save_profile
         - load_profile

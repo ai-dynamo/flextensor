@@ -15,7 +15,10 @@ There are two paths, in order of preference:
 | **`compile_fn` on `offload()`** | Default — compiled offload with break-free custom ops |
 | **`external_compile=True` + external compile** | Your pipeline already calls `torch.compile` outside FlexTensor |
 
-Under offload, compile **one offloaded unit per graph** (typically per block).
+Under offload, compile **one offloaded unit per graph**. Do not guess a
+container such as `model.layers` — use [`offload_units()`](../api/offload-manager.md#flextensor.offload_manager.OffloadManager.offload_units)
+(same set `compile_fn` wraps). GPU-resident islands are
+[`resident_units()`](../api/offload-manager.md#flextensor.offload_manager.OffloadManager.resident_units).
 Whole-model `torch.compile` is not supported for correct output: rolling GPU
 weight slots can alias inside one monolithic graph. With `compile_fn`, FlexTensor
 applies compile at the same granularity as offload automatically.
@@ -69,16 +72,19 @@ from flextensor.offload_manager import get_offload_manager
 
 config = ft.OffloadConfig(include_patterns=["layers.*"], external_compile=True)
 model = ft.offload(model, config)
+om = get_offload_manager()
 
-for _ in range(get_offload_manager().iters_before_inference):
+for _ in range(om.iters_before_inference):
     model(x)  # discovery + profiling → INFERENCE (eager)
 
-blocks = model.layers
-bump_dynamo_limits_for_compiled_offload(len(blocks))
-for i in range(len(blocks)):
-    blocks[i] = torch.compile(blocks[i], fullgraph=True)
+units = om.offload_units()
+bump_dynamo_limits_for_compiled_offload(len(units))
+for _name, module in units:
+    module.compile(fullgraph=True)  # in-place; do not guess model.layers
 
-om = get_offload_manager()
+for _name, module in om.resident_units():
+    module.compile(fullgraph=True)  # GPU-resident; no replan required
+
 for _ in range(om.request_strategy_replan()):
     model(x)  # warm→measure→replan tail
 ```

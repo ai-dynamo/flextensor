@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add `OffloadManager.offload_units()` / `resident_units()` (and matching
+  package-level helpers) to list outermost offloaded and GPU-resident modules
+  as `(name, module)` pairs for external per-unit compile.
+
 ### Fixed
 
 - Support offloading models that cache tensor views in nested objects.
