@@ -291,15 +291,19 @@ class TensorTypeHandler:
         return ctx.process_and_preserve(value)
 
 
-class SequenceTypeHandler:
-    """Handler for plain ``list`` and ``tuple`` attributes."""
+class _ReachableContainerTypeHandler:
+    """Read-only traversal that skips values which cannot contain tensors."""
+
+    _LEAF_TYPES = (types.NoneType, bool, int, float, complex, str, bytes)
 
     def can_handle(self, value: Any) -> bool:
-        return type(value) in {list, tuple}
+        return isinstance(value, (dict, set)) or type(value) in (list, tuple)
 
-    def process_attribute(self, value: list | tuple, ctx: ProcessingContext) -> list | tuple:
-        for item in value:
-            ctx.dispatch(item)
+    def process_attribute(self, value: dict | list | set | tuple, ctx: ProcessingContext) -> object:
+        values = value.values() if isinstance(value, dict) else value
+        for item in values:
+            if type(item) not in self._LEAF_TYPES:
+                ctx.dispatch(item)
         return value
 
 
@@ -314,9 +318,10 @@ class _ObjectAttributesTypeHandler:
         self._visited.clear()
 
     def can_handle(self, value: Any) -> bool:
+        # CPython type metadata avoids slow static reflection on every dispatched value.
         return (
             not isinstance(value, (type, torch.Tensor, torch.nn.Module))
-            and inspect.getattr_static(value, "__dict__", None) is not None
+            and getattr(type(value), "__dictoffset__", 0) != 0
         )
 
     def process_attribute(self, value: object, ctx: ProcessingContext) -> object:
@@ -837,7 +842,7 @@ class ReachableTensorMapProcessor(TensorProcessor):
         self._object_attributes_handler = _ObjectAttributesTypeHandler()
         super().__init__(
             update_attributes=False,
-            type_handlers=[SequenceTypeHandler(), self._object_attributes_handler],
+            type_handlers=[_ReachableContainerTypeHandler(), self._object_attributes_handler],
         )
         self.reachable_tensors: dict[int, torch.Tensor] = {}
 

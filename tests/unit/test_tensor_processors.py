@@ -10,6 +10,7 @@ import pytest
 import torch
 import torch.nn as nn
 
+import flextensor.tensor_processors as tensor_processors
 from flextensor.tensor_manager import ModelDict
 from flextensor.tensor_processors import (
     DisableRequiresGradTensorProcessor,
@@ -275,6 +276,28 @@ class TestReachableTensorMapProcessor:
         assert id(dict_view) in ids
         assert id(set_view) in ids
 
+    def test_returns_tensors_nested_in_ordered_dict(self) -> None:
+        tensor = torch.zeros(1)
+        model = nn.Module()
+        model.metadata = collections.OrderedDict((("tensor", tensor),))
+
+        assert id(tensor) in compute_reachable_tensor_ids(model)
+
+    def test_skips_scalar_mapping_leaves_before_object_detection(self, monkeypatch) -> None:
+        tensor = torch.zeros(1)
+        model = nn.Module()
+        model.metadata = {"values": {index: index for index in range(10)}, "tensor": tensor}
+        original_can_handle = tensor_processors._ObjectAttributesTypeHandler.can_handle
+
+        def reject_scalar(self, value):
+            if type(value) is int:
+                pytest.fail("scalar mapping leaf reached object detection")
+            return original_can_handle(self, value)
+
+        monkeypatch.setattr(tensor_processors._ObjectAttributesTypeHandler, "can_handle", reject_scalar)
+
+        assert id(tensor) in compute_reachable_tensor_ids(model)
+
     def test_returns_tensors_nested_in_list_and_tuple_attributes(self) -> None:
         class _M(nn.Module):
             def __init__(self) -> None:
@@ -437,6 +460,19 @@ class TestReachableTensorMapProcessor:
         proc.apply(m)
 
         assert proc.get_results()[id(replacement)] is replacement
+
+    def test_plain_object_detection_avoids_static_reflection(self, monkeypatch) -> None:
+        @dataclasses.dataclass
+        class Holder:
+            tensor: torch.Tensor
+
+        monkeypatch.setattr(
+            tensor_processors.inspect,
+            "getattr_static",
+            lambda *_args, **_kwargs: pytest.fail("slow static reflection used"),
+        )
+
+        assert tensor_processors._ObjectAttributesTypeHandler().can_handle(Holder(torch.zeros(1)))
 
 
 class TestMoveBuffersToGPUTensorProcessor:
