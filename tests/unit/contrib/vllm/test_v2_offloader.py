@@ -8,6 +8,7 @@ import importlib
 import logging
 import sys
 import types
+from dataclasses import dataclass
 from types import SimpleNamespace
 from weakref import ref
 
@@ -157,6 +158,25 @@ def test_bootstrap_preserves_preexisting_buffer_view_during_weight_load(bootstra
 
     assert unit.weight.untyped_storage()._cdata == unit.weight_view.untyped_storage()._cdata
     torch.testing.assert_close(unit.weight_view, torch.arange(8, dtype=torch.float32).view(4, 2))
+
+
+def test_bootstrap_preserves_tensor_alias_nested_in_quant_config_dataclasses(bootstrap_module) -> None:
+    @dataclass
+    class QuantDesc:
+        scale: torch.Tensor
+
+    @dataclass
+    class QuantConfig:
+        weight: QuantDesc
+
+    unit = nn.Module()
+    unit.weight = nn.Parameter(torch.arange(8, dtype=torch.float32).view(2, 4))
+    cached_scale = unit.weight.view(4, 2)
+    unit.quant_method = SimpleNamespace(moe_quant_config=QuantConfig(QuantDesc(cached_scale)))
+
+    bootstrap_module.VllmBootstrapOffloader().wrap_modules(iter([unit]))
+
+    assert cached_scale.untyped_storage()._cdata == unit.weight.untyped_storage()._cdata
 
 
 def test_stage_parameter_storage_cache_releases_replaced_backing(bootstrap_module) -> None:

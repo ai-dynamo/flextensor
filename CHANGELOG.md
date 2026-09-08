@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Support offloading models that cache tensor views in nested objects.
+- Support offloading models with broadcast or expanded tensor weights.
+
 ## [0.4.0] — 2026-08-17
 
 ### Added

@@ -422,6 +422,22 @@ class TestReachableTensorMapProcessor:
         assert m.w is original_w
         assert proc.get_results()[id(original_w)] is original_w
 
+    def test_map_processor_revisits_plain_objects_on_each_apply(self) -> None:
+        @dataclasses.dataclass
+        class Holder:
+            tensor: torch.Tensor
+
+        m = nn.Module()
+        m.holder = Holder(torch.zeros(1))
+        proc = ReachableTensorMapProcessor()
+        proc.apply(m)
+
+        replacement = torch.ones(1)
+        m.holder.tensor = replacement
+        proc.apply(m)
+
+        assert proc.get_results()[id(replacement)] is replacement
+
 
 class TestMoveBuffersToGPUTensorProcessor:
     """Test cases for MoveBuffersToGPUTensorProcessor to ensure buffers are moved to GPU."""

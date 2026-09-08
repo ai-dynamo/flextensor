@@ -303,6 +303,32 @@ class SequenceTypeHandler:
         return value
 
 
+class _ObjectAttributesTypeHandler:
+    """Read-only traversal of tensor-bearing attributes on plain objects."""
+
+    def __init__(self) -> None:
+        self._visited: set[int] = set()
+
+    def reset(self) -> None:
+        """Forget objects visited during the previous traversal."""
+        self._visited.clear()
+
+    def can_handle(self, value: Any) -> bool:
+        return (
+            not isinstance(value, (type, torch.Tensor, torch.nn.Module))
+            and inspect.getattr_static(value, "__dict__", None) is not None
+        )
+
+    def process_attribute(self, value: object, ctx: ProcessingContext) -> object:
+        value_id = id(value)
+        if value_id in self._visited:
+            return value
+        self._visited.add(value_id)
+        for field in vars(value).values():
+            ctx.dispatch(field)
+        return value
+
+
 class SetTypeHandler:
     """Built-in handler for non-empty ``set`` attributes."""
 
@@ -801,16 +827,22 @@ class ReachableTensorMapProcessor(TensorProcessor):
     tensors — their ``id()`` doesn't correspond to a real allocation, so
     they aren't useful as a narrowing input.
 
-    Adds list and tuple traversal to the standard :class:`TensorProcessor`
-    walk. The convenience wrapper :func:`compute_reachable_tensor_map` is the
-    typical entry point for callers that need the tensor objects.
+    Adds list, tuple, and plain-object attribute traversal to the standard
+    :class:`TensorProcessor` walk. The convenience wrapper
+    :func:`compute_reachable_tensor_map` is the typical entry point for callers
+    that need the tensor objects.
     """
 
     def __init__(self) -> None:
-        super().__init__(update_attributes=False, type_handlers=[SequenceTypeHandler()])
+        self._object_attributes_handler = _ObjectAttributesTypeHandler()
+        super().__init__(
+            update_attributes=False,
+            type_handlers=[SequenceTypeHandler(), self._object_attributes_handler],
+        )
         self.reachable_tensors: dict[int, torch.Tensor] = {}
 
     def apply(self, model: object) -> None:
+        self._object_attributes_handler.reset()
         # ``ModelDict`` is intentionally not imported here: tensor_manager
         # imports this module, so support the wrapper structurally via items().
         self._visited = set()
