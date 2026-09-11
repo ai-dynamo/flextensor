@@ -18,8 +18,10 @@ from dataclasses import dataclass, field
 from unittest.mock import MagicMock, patch
 
 import pytest
+import torch
 
 from flextensor.collectors import LayerStatistics, TensorStatistics
+from flextensor.core.transfer import CudaTransferRuntime
 from flextensor.loaders import (
     PreallocatedBatchTransferTensorLoader,
     PreallocatedBatchTransferTensorLoaderReordered,
@@ -202,7 +204,7 @@ def _create_loader(
     transfer_stream = recorder.make_stream("transfer", events_completed=not slow_transfer)
     controller = recorder.make_controller()
 
-    mock_device = MagicMock()
+    mock_device = torch.device("cuda")
 
     with (
         patch("torch.cuda.Stream", return_value=transfer_stream),
@@ -214,7 +216,6 @@ def _create_loader(
             device_gpu=mock_device,
             label_to_block_id=label_to_block_id,
             transfer_to_compute_map=transfer_to_compute_map,
-            stream_priority=0,
             allocation_controller=controller,
             offload_timing_collector=offload_timing_collector,
         )
@@ -231,6 +232,135 @@ def _run_inference(loader, labels: list[str], recorder: SyncRecorder) -> None:
         loader.enter(label)
         recorder.forward(label)
         loader.exit(label)
+
+
+def _operation_trace(recorder: SyncRecorder) -> list[tuple[str, str]]:
+    return [(entry.op, entry.stream) for entry in recorder.log]
+
+
+@pytest.mark.parametrize(
+    "loader_cls",
+    [PreallocatedBatchTransferTensorLoader, PreallocatedBatchTransferTensorLoaderReordered],
+)
+def test_preallocated_loader_delegates_to_core_runtime(loader_cls):
+    labels = ["embed", "L0"]
+    layer_stats = _make_layer_stats(labels)
+    transfer_to_compute_map = {"embed": "L0"}
+    label_to_block_id = {"embed": 0}
+    recorder = SyncRecorder()
+
+    with _create_loader(
+        loader_cls,
+        layer_stats,
+        label_to_block_id,
+        transfer_to_compute_map,
+        recorder,
+    ) as loader:
+        assert isinstance(loader._transfer_runtime, CudaTransferRuntime)
+        assert loader.transfer_stream is loader._transfer_runtime.transfer_stream
+
+
+@pytest.mark.parametrize(
+    "loader_cls",
+    [PreallocatedBatchTransferTensorLoader, PreallocatedBatchTransferTensorLoaderReordered],
+)
+def test_preallocated_loader_labels_transfer_ticket_with_schedule_and_consumer(loader_cls):
+    labels = ["embed", "L0"]
+    layer_stats = _make_layer_stats(labels)
+    transfer_to_compute_map = {"embed": "L0"}
+    label_to_block_id = {"embed": 0}
+    recorder = SyncRecorder()
+
+    with _create_loader(
+        loader_cls,
+        layer_stats,
+        label_to_block_id,
+        transfer_to_compute_map,
+        recorder,
+    ) as loader:
+        loader.enter("embed")
+        scheduled = next(iter(loader.scheduled_transfers.values()))
+        ticket = scheduled[0] if isinstance(scheduled, list) else scheduled
+
+        assert ticket.trace_label == "schedule=embed consume=L0"
+
+
+@pytest.mark.parametrize(
+    ("loader_cls", "expected"),
+    [
+        (
+            PreallocatedBatchTransferTensorLoader,
+            [
+                ("record_event", "compute"),
+                ("wait_event", "transfer"),
+                ("schedule_transfer", "transfer"),
+                ("record_event", "transfer"),
+                ("forward", "compute"),
+                ("wait_event", "compute"),
+                ("record_event", "compute"),
+                ("schedule_transfer", "transfer"),
+                ("record_event", "transfer"),
+                ("forward", "compute"),
+                ("wait_event", "compute"),
+                ("record_event", "compute"),
+                ("wait_event", "transfer"),
+                ("schedule_transfer", "transfer"),
+                ("record_event", "transfer"),
+                ("forward", "compute"),
+                ("wait_event", "compute"),
+                ("record_event", "compute"),
+                ("forward", "compute"),
+                ("record_event", "compute"),
+                ("record_event", "transfer"),
+                ("wait_event", "compute"),
+            ],
+        ),
+        (
+            PreallocatedBatchTransferTensorLoaderReordered,
+            [
+                ("record_event", "compute"),
+                ("wait_event", "transfer"),
+                ("schedule_transfer", "transfer"),
+                ("record_event", "transfer"),
+                ("forward", "compute"),
+                ("record_event", "compute"),
+                ("wait_event", "compute"),
+                ("schedule_transfer", "transfer"),
+                ("record_event", "transfer"),
+                ("forward", "compute"),
+                ("record_event", "compute"),
+                ("wait_event", "compute"),
+                ("wait_event", "transfer"),
+                ("schedule_transfer", "transfer"),
+                ("record_event", "transfer"),
+                ("forward", "compute"),
+                ("record_event", "compute"),
+                ("wait_event", "compute"),
+                ("forward", "compute"),
+                ("record_event", "compute"),
+                ("record_event", "transfer"),
+                ("wait_event", "compute"),
+            ],
+        ),
+    ],
+)
+def test_preallocated_loader_operation_trace_is_frozen(loader_cls, expected):
+    labels = ["embed", "L0", "L1", "L2"]
+    layer_stats = _make_layer_stats(labels)
+    transfer_to_compute_map = {"embed": "L0", "L0": "L1", "L1": "L2"}
+    label_to_block_id = {"embed": 0, "L0": 1, "L1": 0}
+    recorder = SyncRecorder()
+
+    with _create_loader(
+        loader_cls,
+        layer_stats,
+        label_to_block_id,
+        transfer_to_compute_map,
+        recorder,
+    ) as loader:
+        _run_inference(loader, labels, recorder)
+
+    assert _operation_trace(recorder) == expected
 
 
 @pytest.mark.parametrize(
@@ -255,6 +385,53 @@ def test_sync_prev_onload_waits_compute_stream_on_transfer_stream(loader_cls):
     assert len(recorder.log) == 1
     assert recorder.log[0].op == "wait_stream"
     assert recorder.log[0].stream == "compute"
+
+
+def test_reordered_preload_does_not_add_redundant_compute_wait():
+    labels = ["embed", "L0", "L1"]
+    layer_stats = _make_layer_stats(labels)
+    transfer_to_compute_map = {"embed": "L0", "L0": "L1", "L1": "embed"}
+    label_to_block_id = {"embed": 0, "L0": 1, "L1": 2}
+    recorder = SyncRecorder()
+
+    with _create_loader(
+        PreallocatedBatchTransferTensorLoaderReordered,
+        layer_stats,
+        label_to_block_id,
+        transfer_to_compute_map,
+        recorder,
+    ) as loader:
+        loader.sync_prev_onload()
+        recorder.log.clear()
+        loader.enter("embed")
+
+    assert recorder.find_entries("wait_event", stream="compute") == []
+
+
+@pytest.mark.parametrize(
+    "loader_cls",
+    [PreallocatedBatchTransferTensorLoader, PreallocatedBatchTransferTensorLoaderReordered],
+)
+def test_one_compute_label_releases_every_consumed_slot(loader_cls):
+    labels = ["A", "B", "C", "tail"]
+    layer_stats = _make_layer_stats(labels)
+    transfer_to_compute_map = {"A": "C", "B": "C"}
+    label_to_block_id = {"A": 0, "B": 1}
+    recorder = SyncRecorder()
+
+    with _create_loader(
+        loader_cls,
+        layer_stats,
+        label_to_block_id,
+        transfer_to_compute_map,
+        recorder,
+    ) as loader:
+        for label in ["A", "B", "C"]:
+            loader.enter(label)
+            loader.exit(label)
+
+        loader._transfer_runtime.submit(0, lambda: None)
+        loader._transfer_runtime.submit(1, lambda: None)
 
 
 # ---------------------------------------------------------------------------
@@ -636,8 +813,8 @@ class TestBlockReuseSafety:
             _run_inference(loader, labels, recorder)
 
         # When enter("L1") wants to reuse block 0 (previously used by "embed"),
-        # the transfer stream must wait for compute_events_map[compute_label]
-        # where compute_label = transfer_to_compute_map["embed"] = "L0".
+        # the transfer stream must wait for the runtime's last-use event for
+        # block 0, recorded after L0 consumes embed's transfer.
         # This ensures L0's forward (which reads from block 0) has completed
         # before the transfer stream overwrites block 0 with L2's data.
         transfer_waits = recorder.find_entries("wait_event", stream="transfer")
@@ -1063,12 +1240,11 @@ class TestCUDAGraphForkJoin:
 
             loader.exit("L0")
 
+            assert len(recorder.find_entries("record_event", stream="compute")) == 1, recorder.dump()
             assert recorder.find_entries("record_event", stream="transfer") == [], recorder.dump()
             assert recorder.find_entries("wait_event", stream="compute") == [], recorder.dump()
             assert policy.on_piece_join() == []
             assert loader.scheduled_transfers == {}
-            assert loader.compute_events_map == {}
-            assert loader.last_block_id_to_label_map == {}
 
     def test_cross_iteration_fork_after_join(self):
         """Second iteration's fork must come after first iteration's join."""
@@ -1151,51 +1327,9 @@ class TestEventMapClearing:
 
         with _create_loader(loader_cls, layer_stats, label_to_block_id, transfer_to_compute_map, recorder) as loader:
             _run_inference(loader, labels, recorder)
-            assert loader.compute_events_map == {}, (
-                f"compute_events_map should be empty after last-layer exit; got {loader.compute_events_map}"
-            )
-            assert loader.last_block_id_to_label_map == {}, (
-                "last_block_id_to_label_map should be empty after last-layer exit; got "
-                f"{loader.last_block_id_to_label_map}"
-            )
+            assert loader._transfer_runtime._last_use_by_slot == {}
             assert loader.scheduled_transfers == {}, (
                 f"scheduled_transfers should be empty after last-layer join; got {loader.scheduled_transfers}"
-            )
-
-    @pytest.mark.parametrize(
-        "loader_cls",
-        [PreallocatedBatchTransferTensorLoader, PreallocatedBatchTransferTensorLoaderReordered],
-    )
-    def test_first_layer_enter_clears_stale_event_maps(self, loader_cls, caplog):
-        labels = ["embed", "L0", "L1"]
-        layer_stats = _make_layer_stats(labels)
-        transfer_to_compute_map = {"embed": "L0", "L0": "L1"}
-        label_to_block_id = {"embed": 0, "L0": 1}
-        recorder = SyncRecorder()
-
-        with _create_loader(loader_cls, layer_stats, label_to_block_id, transfer_to_compute_map, recorder) as loader:
-            # Simulate aborted mid-iteration: stale entries left in both maps.
-            sentinel_event = MockEvent(name="stale_event", completed=True)
-            loader.compute_events_map["stale"] = sentinel_event
-            loader.last_block_id_to_label_map[7] = "stale"
-
-            with caplog.at_level("DEBUG", logger="flextensor.loaders"):
-                loader.enter("embed")
-
-            assert "stale" not in loader.compute_events_map, (
-                "first-layer enter() must clear stale compute_events_map entries"
-            )
-            assert 7 not in loader.last_block_id_to_label_map, (
-                "first-layer enter() must clear stale last_block_id_to_label_map entries"
-            )
-            stale_log_records = [
-                r
-                for r in caplog.records
-                if "stale" in r.getMessage().lower() or "abort recovery" in r.getMessage().lower()
-            ]
-            assert stale_log_records, (
-                f"first-layer enter() must DEBUG-log the safety-net clear; got: "
-                f"{[r.getMessage() for r in caplog.records]}"
             )
 
     @pytest.mark.parametrize(
@@ -1210,7 +1344,7 @@ class TestEventMapClearing:
         recorder = SyncRecorder()
 
         with _create_loader(loader_cls, layer_stats, label_to_block_id, transfer_to_compute_map, recorder) as loader:
-            assert loader.compute_events_map == {} and loader.last_block_id_to_label_map == {}
+            assert not loader._transfer_runtime.is_active
 
             with caplog.at_level("DEBUG", logger="flextensor.loaders"):
                 loader.enter("embed")
@@ -1235,49 +1369,36 @@ class TestScheduledTransferJoinThenClear:
         recorder = SyncRecorder()
 
         with _create_loader(loader_cls, layer_stats, label_to_block_id, transfer_to_compute_map, recorder) as loader:
-            stale = MockEvent(name="pre_capture_h2d", completed=False)
-            loader.scheduled_transfers["embed" if loader_cls is PreallocatedBatchTransferTensorLoader else "L0"] = stale
-            loader.compute_events_map["L0"] = MockEvent(name="stale_compute", completed=True)
-            loader._has_pending_transfer_work = True
+            loader.enter("embed")
+            stale = next(iter(loader.scheduled_transfers.values()))
+            recorder.log.clear()
 
             with caplog.at_level("DEBUG", logger="flextensor.loaders"):
                 loader.enter("embed")
 
             assert stale not in loader.scheduled_transfers.values()
-            assert "stale" not in loader.compute_events_map
             assert any("abort recovery" in r.getMessage().lower() for r in caplog.records)
-            assert not any(e.op == "wait_event" and e.target == "pre_capture_h2d" for e in recorder.log), (
-                f"must not wait_event on planted pre-capture handle:\n{recorder.dump()}"
-            )
             assert any(e.op == "record_event" and e.stream == "transfer" for e in recorder.log)
             assert any(e.op == "wait_event" and e.stream == "compute" for e in recorder.log)
 
-    @pytest.mark.parametrize(
-        "loader_cls",
-        [PreallocatedBatchTransferTensorLoader, PreallocatedBatchTransferTensorLoaderReordered],
-    )
-    def test_preload_only_keeps_scheduled_completion_events(self, loader_cls):
-        """``last_block_id`` from preload is not abort — do not wipe preload waits."""
+    def test_reordered_preload_is_counted_as_consumed_by_piecewise_policy(self):
         labels = ["embed", "L0", "L1"]
         layer_stats = _make_layer_stats(labels)
-        transfer_to_compute_map = {"embed": "L0", "L0": "L1"}
-        label_to_block_id = {"embed": 0, "L0": 1}
+        transfer_to_compute_map = {"embed": "L0", "L0": "L1", "L1": "embed"}
+        label_to_block_id = {"embed": 0, "L0": 1, "L1": 2}
         recorder = SyncRecorder()
 
-        with _create_loader(loader_cls, layer_stats, label_to_block_id, transfer_to_compute_map, recorder) as loader:
-            preload_ev = MockEvent(name="preload_h2d", completed=False)
-            loader.scheduled_transfers["embed"] = preload_ev
-            loader.last_block_id_to_label_map[0] = "embed"
-            loader.compute_events_map.clear()
-            loader._has_pending_transfer_work = False
-
-            loader.enter("embed")
-
-            if loader_cls is PreallocatedBatchTransferTensorLoaderReordered:
-                assert preload_ev.completed is True
-                assert any(e.op == "wait_event" and e.target == "preload_h2d" for e in recorder.log)
-            else:
-                assert "embed" in loader.scheduled_transfers
+        with _create_loader(
+            PreallocatedBatchTransferTensorLoaderReordered,
+            layer_stats,
+            label_to_block_id,
+            transfer_to_compute_map,
+            recorder,
+        ) as loader:
+            loader.piecewise_prefetch_policy.enabled = True
+            loader.piecewise_prefetch_policy.strict = True
+            _run_inference(loader, labels, recorder)
+            _run_inference(loader, labels, recorder)
 
     @pytest.mark.parametrize(
         "loader_cls",
@@ -1318,35 +1439,6 @@ class TestScheduledTransferJoinThenClear:
                 assert any(
                     e.op == "wait_event" and e.stream == "compute" and e.stalled for e in recorder.log[:split]
                 ), f"expected stalled wait under slow_transfer:\n{recorder.dump()}"
-
-    def test_reordered_eager_then_capture_skips_pre_capture_scheduled_wait(self):
-        """After an eager forward, a new 'capture' enter must not wait pre-capture events."""
-        labels = ["embed", "L0", "L1"]
-        layer_stats = _make_layer_stats(labels)
-        transfer_to_compute_map = {"embed": "L0", "L0": "L1"}
-        label_to_block_id = {"embed": 0, "L0": 1}
-        recorder = SyncRecorder()
-
-        with _create_loader(
-            PreallocatedBatchTransferTensorLoaderReordered,
-            layer_stats,
-            label_to_block_id,
-            transfer_to_compute_map,
-            recorder,
-        ) as loader:
-            _run_inference(loader, labels, recorder)
-            leaked = MockEvent(name="leaked_precapture", completed=False)
-            loader.scheduled_transfers["embed"] = leaked
-            loader.compute_events_map["ghost"] = MockEvent(name="ghost", completed=True)
-            loader._has_pending_transfer_work = True
-            recorder.log.clear()
-
-            loader.enter("embed")
-
-            assert leaked not in loader.scheduled_transfers.values()
-            assert not any(e.op == "wait_event" and e.target == "leaked_precapture" for e in recorder.log), (
-                f"capture enter must not wait_event(leaked_precapture); got log:\n{recorder.dump()}"
-            )
 
 
 def _timing_hook_names(calls: list[tuple]) -> list[str]:

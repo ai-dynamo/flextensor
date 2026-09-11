@@ -125,12 +125,10 @@ def count_pipeline_violations(layer_to_block: dict[str, int]) -> int:
 
     Cyclic wrap-around (last layer vs first layer) is NOT counted because
     the PreallocatedBatchTransferTensorLoader handles it via cross-iteration
-    synchronization: ``last_iteration_event`` ensures the previous iteration's
-    transfers complete before the next iteration starts, and the per-block
-    ``compute_events_map`` check guarantees the consuming compute finishes
-    before the block is overwritten.  A cyclic overlap only adds latency
-    (waiting for the transfer), which the optimizer already accounts for
-    via the ``scale`` parameter.
+    synchronization: the runtime's final join orders the previous iteration
+    before slot reuse. A cyclic overlap only adds latency (waiting for the
+    transfer), which the optimizer already accounts for via the ``scale``
+    parameter.
 
     Args:
         layer_to_block: Mapping of layer label to block ID.

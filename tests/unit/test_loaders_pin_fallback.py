@@ -276,7 +276,11 @@ def test_strategy_loader_shutdown_drops_preloads_and_transfer_state():
 def test_preallocated_loader_shutdown_synchronizes_before_releasing_blocks():
     events = []
     loader = PreallocatedBatchTransferTensorLoader.__new__(PreallocatedBatchTransferTensorLoader)
-    loader.transfer_stream = type("Stream", (), {"synchronize": lambda _self: events.append("synchronize")})()
+    loader._transfer_runtime = type(
+        "Runtime",
+        (),
+        {"close": lambda _self: events.append("synchronize")},
+    )()
     loader.allocation_controller = type("Controller", (), {"shutdown": lambda _self: events.append("shutdown")})()
 
     loader.shutdown()

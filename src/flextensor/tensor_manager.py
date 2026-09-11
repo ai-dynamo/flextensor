@@ -22,6 +22,7 @@ from flextensor.collectors import (
     TensorStatistics,
 )
 from flextensor.config import BLOCK_TRANSFER_MODES, OffloadTimingMode, PiecewisePrefetchMode, ProfileMode
+from flextensor.core.transfer import TransferStreamSynchronizationError
 from flextensor.gpu_budget import (
     CUDAMemorySnapshot,
     reserve_strategy_invisible_gpu_budget,
@@ -43,7 +44,6 @@ from flextensor.loaders import (
     RawBlockController,
     TensorLayerLoader,
     TensorStrategyLoader,
-    TransferStreamSynchronizationError,
     UntimedTrapRescuer,
     WarmupDirectTensorLoader,
 )
@@ -1405,7 +1405,6 @@ class TensorManager:
             self.device_gpu,
             label_to_block_id,
             transfer_to_compute_map,
-            stream_priority=self.transfer_stream_priority,
             allocation_controller=block_controller,
             offload_timing_collector=self._make_offload_timing_collector(),
             piecewise_prefetch_policy=self._make_piecewise_prefetch_policy(),
@@ -1528,7 +1527,6 @@ class TensorManager:
             self.device_gpu,
             label_to_block_id,
             transfer_to_compute_map,
-            stream_priority=self.transfer_stream_priority,
             allocation_controller=block_controller,
             offload_timing_collector=self._make_offload_timing_collector(),
             piecewise_prefetch_policy=self._make_piecewise_prefetch_policy(),

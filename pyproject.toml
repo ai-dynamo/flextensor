@@ -220,6 +220,12 @@ forbidden_modules = [
     "flextensor.shm",
 ]
 
+[[tool.importlinter.contracts]]
+name = "Core is dependency-light"
+type = "forbidden"
+source_modules = ["flextensor.core"]
+forbidden_modules = ["flextensor.*"]
+
 [tool.ruff]
 preview = true
 target-version = "py310"
