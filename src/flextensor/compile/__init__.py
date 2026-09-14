@@ -12,9 +12,12 @@ from flextensor.compile.lifecycle import (
     COMPILED_WARMUP_FORWARDS,
     CompiledOffload,
 )
+from flextensor.compile.replan_status import StrategyReplanState, StrategyReplanStatus
 
 __all__ = [
     "COMPILED_EAGER_PROFILE_FORWARDS",
     "COMPILED_WARMUP_FORWARDS",
     "CompiledOffload",
+    "StrategyReplanState",
+    "StrategyReplanStatus",
 ]

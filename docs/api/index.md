@@ -23,6 +23,7 @@ Module-level convenience functions — the recommended starting point for most u
 - [`release()`](simplified.md#flextensor.offload_manager.release) — Release resources and restore model
 - [`collect_offload_timing()`](simplified.md#flextensor.offload_manager.collect_offload_timing) / [`reset_offload_timing()`](simplified.md#flextensor.offload_manager.reset_offload_timing) / [`update_offload_timing()`](simplified.md#flextensor.offload_manager.update_offload_timing) — Inference offload-timing measure window
 - [`request_strategy_replan()`](simplified.md#flextensor.offload_manager.request_strategy_replan) / [`update_state()`](simplified.md#flextensor.offload_manager.update_state) — Remeasure and rebuild strategy (compile / CUDA graphs)
+- [`StrategyReplanStatus`](simplified.md#flextensor.compile.replan_status.StrategyReplanStatus) — Passive replan availability and outcome, read from `OffloadManager.strategy_replan_status`
 - [`OffloadTimingReport`](simplified.md#flextensor.offload_timing.OffloadTimingReport) / [`OffloadTimingSnapshot`](simplified.md#flextensor.offload_timing.OffloadTimingSnapshot) — Timing aggregates and per-pass data
 - [`load_model_from_profile()`](simplified.md#flextensor.lazy_model_init.load_model_from_profile) — Load a model from a saved profile with optimized weight loading
 

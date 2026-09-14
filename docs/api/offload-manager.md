@@ -28,6 +28,8 @@ rather than constructing one directly.
         - collect_offload_timing
         - reset_offload_timing
         - update_offload_timing
+        - external_compile_active
+        - strategy_replan_status
         - request_strategy_replan
         - update_state
         - release

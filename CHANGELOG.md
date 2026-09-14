@@ -16,9 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `OffloadManager.offload_units()` / `resident_units()` (and matching
   package-level helpers) to list outermost offloaded and GPU-resident modules
   as `(name, module)` pairs for external per-unit compile.
+- Add `OffloadManager.external_compile_active` and
+  `OffloadManager.strategy_replan_status` to check whether a
+  [strategy replan](docs/api/glossary.md#strategy-replan) is available and
+  whether it succeeded, without affecting the run. See
+  [torch.compile](docs/how-to/torch-compile.md#preflight-and-verify-the-replan).
 
 ### Fixed
 
+- Prevent an invalid `request_strategy_replan()` from discarding the progress or
+  the recorded failure of an earlier replan. Requests that cannot run now warn
+  and return `0` instead of restarting measurement.
 - Support offloading models that cache tensor views in nested objects.
 - Support offloading models with broadcast or expanded tensor weights.
 

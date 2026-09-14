@@ -32,6 +32,10 @@ class WarmupTail:
         # False if finish returned a soft keep-current (empty budgets / rebuild
         # refused). None while the tail has not finished.
         self.replan_applied: bool | None = None
+        # Whether :meth:`arm` ran. ``mark_done`` also closes tails that were
+        # never armed (compiled view-profile), which have no replan outcome to
+        # report; see ``flextensor.compile.replan_status``.
+        self.armed: bool = False
         # When False, skip enable_compiled_profiling on MEASURING entry (e.g.
         # CUDA-graph offload-timing replan supplies budgets elsewhere).
         self.enable_profiling: bool = True
@@ -43,6 +47,7 @@ class WarmupTail:
         self.failure = None
         self.replan_applied = None
         self.enable_profiling = True
+        self.armed = False
 
     def arm(self, *, credited_warm: int = 0, enable_profiling: bool = True) -> int:
         """Arm warm→measure; return remaining forwards until finish."""
@@ -52,6 +57,7 @@ class WarmupTail:
         self.failure = None
         self.replan_applied = None
         self.enable_profiling = enable_profiling
+        self.armed = True
         remaining_warm = self.warmup_forwards - credited
         if credited >= self.warmup_forwards:
             self.state = CompiledOffloadTailState.MEASURING

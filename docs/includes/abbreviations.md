@@ -22,6 +22,8 @@
 *[offloading strategy]: Algorithm that decides which weights to keep on GPU vs. move to CPU (e.g., KnapsackStrategy, GreedyStrategy, AdaptiveStrategy).
 *[profiling phase]: Second active phase — measures per-trap execution timing using CUDA events across profiling_iters iterations. "Profiling" is the process; the offload profile is the artifact.
 *[release strategy]: Algorithm that decides when to free GPU memory after a trap finishes executing its module.
+*[source weights]: Original CPU weight copies retained before the first inference loader build so that a strategy replan can rebuild from them. Consumed by a successful rebuild.
+*[strategy replan]: Rebuilding the offloading strategy after INFERENCE from timings measured under torch.compile or CUDA graphs, instead of the eager timings collected during profiling.
 *[tensor]: In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.
 *[transfer mode]: The mechanism for physically moving weights between CPU and GPU (strategy, allocation_block_transfer, or raw_block_transfer).
 *[transfer window]: The time available to pre-fetch the next trap's weights while the current trap's module executes on GPU.

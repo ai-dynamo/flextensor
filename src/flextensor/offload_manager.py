@@ -25,6 +25,8 @@ from torch.utils.hooks import RemovableHandle  # noqa: TC002 — beartype on @de
 from flextensor.benchmark_tensor_mode import PreloadToDevice
 from flextensor.compile import COMPILED_WARMUP_FORWARDS, CompiledOffload
 from flextensor.compile.module_swap import resolve_offload_units, resolve_resident_units
+from flextensor.compile.replan_status import StrategyReplanStatus, build_strategy_replan_status
+from flextensor.compile.warmup_tail import CompiledOffloadTailState
 from flextensor.compiled_offload import build_compiled_offload_forward
 from flextensor.compiler_utils import disable as _compiler_disable
 from flextensor.compiler_utils import (
@@ -249,6 +251,9 @@ class TensorManagerProtocol(Protocol):
 
     shm_namespace: str | None
     stats: list[LayerStatistics]
+
+    @property
+    def replan_source_weights_available(self) -> bool: ...
 
     def set_model(self, model: nn.Module) -> None: ...
     def build_parameters_mapping(self, model: nn.Module | dict[str, torch.Tensor]) -> None: ...
@@ -573,6 +578,77 @@ class OffloadManager:
     def compiled_profile_active(self) -> bool:
         """Whether view-mode profile runs under ``compile_fn`` (no replan tail)."""
         return self._compiled.profile_active
+
+    @property
+    def external_compile_active(self) -> bool:
+        """Whether the active run uses ``external_compile`` with no ``compile_fn``.
+
+        Describes the **effective live run** as resolved at ``offload()`` —
+        mutating ``config.external_compile`` afterwards cannot flip it (that
+        field is re-read only by the next ``offload()``). ``False`` for eager
+        offload and for FlexTensor-driven ``compile_fn`` runs, which do not need
+        the caller to compile each unit.
+        """
+        return self._compiled.active and self._compiled.compile_fn is None
+
+    @property
+    def strategy_replan_status(self) -> StrategyReplanStatus:
+        """Passive snapshot of the current replan lifecycle.
+
+        Reading this never arms or advances the tail, so it is safe both as a
+        preflight check before :meth:`request_strategy_replan` and as an outcome
+        check after the tail finishes. Field semantics are documented on
+        :class:`~flextensor.StrategyReplanStatus`; for the preflight-then-drive
+        pattern see ``docs/how-to/torch-compile.md``.
+
+        ``can_request`` is required by both :meth:`request_strategy_replan`
+        variants but sufficient only for the default one: the CUDA-graph variant
+        (``manual_update_state=True``) adds requirements — ``offload_timing=
+        'cuda_graph'`` plus external CUDA timing events — not reflected here.
+        """
+        return build_strategy_replan_status(
+            self._compiled.tail_state,
+            armed=self._compiled.tail_armed,
+            replan_applied=self._compiled.replan_applied,
+            can_request=self._can_request_strategy_replan(),
+        )
+
+    def _can_request_strategy_replan(self) -> bool:
+        """Whether a default :meth:`request_strategy_replan` would arm a tail now."""
+        if not (self._compiled.active and self._compiled.replan_active):
+            return False
+        return self._strategy_replan_unavailable_reason() is None
+
+    def _strategy_replan_unavailable_reason(self) -> str | None:
+        """Why a default replan request cannot arm now, or ``None`` when it can.
+
+        Shared by :attr:`strategy_replan_status` and the guard in
+        :meth:`request_strategy_replan` so the advertised ``can_request`` and
+        the actual refusal cannot drift apart. Assumes compiled offload is
+        active with replan armed; ``CompiledOffload.request_strategy_replan``
+        reports those two flags itself.
+        """
+        # Arming installs compiled profiling on the inference loader, and the
+        # tail only advances on INFERENCE forwards.
+        if self._current_phase is not OffloadPhase.INFERENCE:
+            return (
+                f"the lifecycle is still in {self._current_phase.value}; drive "
+                "om.iters_before_inference forwards to reach INFERENCE first"
+            )
+        if self._compiled.tail_state in (
+            CompiledOffloadTailState.WARMING,
+            CompiledOffloadTailState.MEASURING,
+        ):
+            return "a replan tail is already in flight; drive the forwards the request returned"
+        if self._compiled.tail_state is CompiledOffloadTailState.FAILED:
+            return "an earlier replan failed, so inference is already unsafe; restart the process"
+        tm = self._tensor_manager
+        if tm is None or not tm.replan_source_weights_available:
+            return (
+                "FlexTensor no longer retains the source weights a rebuild needs "
+                "(they are consumed by a successful replan)"
+            )
+        return None
 
     @property
     def phase(self) -> OffloadPhase:
@@ -1122,10 +1198,19 @@ class OffloadManager:
 
         Returns:
             Measure (and warmup) forwards / replays to drive, or ``0`` when
-            nothing was armed.
+            nothing was armed. Both paths arm only while
+            :attr:`strategy_replan_status` reports ``can_request``; otherwise
+            they warn and leave the current tail untouched.
         """
         if manual_update_state:
             return self._begin_manual_update_replan()
+        if self._compiled.active and self._compiled.replan_active:
+            # Flags are on, so ``CompiledOffload`` would arm; check the runtime
+            # preconditions it cannot see before it mutates the tail.
+            reason = self._strategy_replan_unavailable_reason()
+            if reason is not None:
+                LOGGER.warning("FlexTensor: request_strategy_replan() ignored — %s.", reason)
+                return 0
         return self._compiled.request_strategy_replan()
 
     def _begin_manual_update_replan(self) -> int:
@@ -1163,6 +1248,17 @@ class OffloadManager:
                 "FlexTensor: request_strategy_replan(manual_update_state=True) needs "
                 "external CUDA timing events on the collector; this build fell back "
                 "to internal events (or offload_timing was not 'cuda_graph'). Not arming."
+            )
+            return 0
+
+        # Same runtime preconditions as the default path, checked before any
+        # side effect below: re-arming would reset an in-flight measurement or
+        # drop a recorded failure.
+        reason = self._strategy_replan_unavailable_reason()
+        if reason is not None:
+            LOGGER.warning(
+                "FlexTensor: request_strategy_replan(manual_update_state=True) ignored — %s.",
+                reason,
             )
             return 0
 

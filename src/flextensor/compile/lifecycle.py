@@ -110,6 +110,16 @@ class CompiledOffload:
         self._tail.state = value
 
     @property
+    def tail_armed(self) -> bool:
+        """Whether a replan tail was armed (a replan was actually requested)."""
+        return self._tail.armed
+
+    @property
+    def replan_applied(self) -> bool | None:
+        """``True``/``False`` once the tail finished; ``None`` while unfinished."""
+        return self._tail.replan_applied
+
+    @property
     def tail_failure(self) -> BaseException | None:
         return self._tail.failure
 

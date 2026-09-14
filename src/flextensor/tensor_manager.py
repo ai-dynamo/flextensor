@@ -610,6 +610,19 @@ class TensorManager:
         """
         self._first_loader_non_destructive = True
 
+    @property
+    def replan_source_weights_available(self) -> bool:
+        """Whether a replan could still restore true source weights.
+
+        ``True`` between :meth:`arm_non_destructive_first_loader` and the
+        rebuild that consumes the snapshot. Once
+        :meth:`replan_from_compiled_durations` has copied the originals into new
+        blocks (or :meth:`clear_replan_state` dropped them), a further rebuild
+        would read loader rolling-buffer views and corrupt the model, so it is
+        refused — see :attr:`~flextensor.OffloadManager.strategy_replan_status`.
+        """
+        return bool(self._first_loader_non_destructive or self._replan_source_data)
+
     def clear_replan_state(self) -> None:
         """Drop replan arming and any retained source-weight snapshot.
 

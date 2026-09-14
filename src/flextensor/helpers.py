@@ -270,6 +270,11 @@ class NoOpTensorManager:
     def arm_non_destructive_first_loader(self) -> None:
         pass
 
+    @property
+    def replan_source_weights_available(self) -> bool:
+        # Disabled offload never builds a loader, so there is nothing to replan.
+        return False
+
     def clear_replan_state(self) -> None:
         pass
 

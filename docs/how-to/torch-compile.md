@@ -93,6 +93,42 @@ Runnable example: `examples/diffusers/compiled-offload/wan_t2v_external_compile.
 
 Prefer `compile_fn` unless your pipeline already owns the compile step.
 
+### Preflight and verify the replan
+
+`request_strategy_replan()` does not raise when replan is unavailable: it logs a
+warning, returns `0`, and serving continues on the eager-profile strategy.
+Pipelines that require the compiled strategy should therefore check availability
+before the request and verify the outcome afterwards. Both properties below are
+passive — reading them never arms or advances the tail:
+
+```python
+if not om.external_compile_active:
+    raise RuntimeError("FlexTensor must use external_compile=True without compile_fn")
+
+if not om.strategy_replan_status.can_request:
+    raise RuntimeError("FlexTensor strategy replan is not available")
+
+for _ in range(om.request_strategy_replan()):
+    model(x)
+
+status = om.strategy_replan_status
+if status.state == "failed" or status.applied is not True:
+    raise RuntimeError("FlexTensor did not apply the new strategy")
+```
+
+`can_request` is `True` only when a request would arm a tail: compiled offload
+active with replan armed, the lifecycle at INFERENCE, no tail in flight or
+`"failed"`, and the source weights still retained. A `"done"` replan that
+refused to rebuild (`applied=False`, for example when no compiled timings were
+captured) can be retried while FlexTensor still holds those weights; a
+successful rebuild consumes them, and a `"failed"` tail is terminal (restart the
+process).
+
+Both `request_strategy_replan()` variants enforce these conditions: when
+`can_request` is `False` they warn and return `0` without disturbing a tail that
+is in flight or already failed. `can_request` is not sufficient for the
+CUDA-graph variant below, which adds requirements it does not cover.
+
 ## CUDA graphs: ``request_strategy_replan(manual_update_state=True)``
 
 After CUDA-graph capture, arm the same replan helper used for external

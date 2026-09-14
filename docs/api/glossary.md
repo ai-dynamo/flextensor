@@ -222,6 +222,23 @@ The default standalone strategy mode, activated by
 `max_gpu_mem_fraction=None`. The strategy optimises for minimum offloading
 latency based on `transfer_budget_scale`, with no explicit memory cap.
 
+### Strategy Replan
+
+Rebuilding the [offloading strategy](#offloading-strategy) after INFERENCE from
+timings measured under the real runtime — `torch.compile`d units or captured
+CUDA graphs — instead of the eager timings collected during the
+[profiling phase](#profiling-phase). Requested with `request_strategy_replan()`,
+which returns the number of forwards (or graph replays) to drive; FlexTensor
+measures across them, then rebuilds the strategy and its loader.
+
+A replan can only rebuild while FlexTensor still holds the **source weights**:
+the original CPU weight copies retained before the first inference loader was
+built. A successful rebuild consumes them, so it cannot be repeated.
+`OffloadManager.strategy_replan_status` reports whether a replan is available
+and whether it applied.
+
+See: [torch.compile](../how-to/torch-compile.md)
+
 ---
 
 ## Transfer System

@@ -60,6 +60,7 @@ def manager(monkeypatch):
     tm = SimpleNamespace(
         tensor_layer_loader=_StubLoader(),
         replan_from_compiled_durations=MagicMock(name="replan_from_compiled_durations", return_value=True),
+        replan_source_weights_available=True,
     )
     om = OffloadManager("default")
     om.set_config(OffloadConfig(profiling_iters=10))

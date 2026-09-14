@@ -24,6 +24,7 @@ except ImportError:
 # New simplified public API
 # Internal implementation (kept for backward compatibility and advanced usage)
 from flextensor.benchmark_tensor_mode import BenchmarkReplace, PreloadToDevice, TensorBenchmarkMode
+from flextensor.compile import StrategyReplanStatus
 from flextensor.config import OffloadConfig, load_config, load_config_from_env, load_config_from_file
 from flextensor.host_pinning import PinnedMemoryMode
 from flextensor.lazy_model_init import load_model_from_profile
@@ -83,6 +84,7 @@ __all__ = [  # noqa: RUF022
     "OffloadConfig",
     "OffloadManager",
     "PinnedMemoryMode",
+    "StrategyReplanStatus",
     "clear_profiling_durations",
     "collect_offload_timing",
     "format_offload_timing_table",
