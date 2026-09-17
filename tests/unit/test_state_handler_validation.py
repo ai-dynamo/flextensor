@@ -21,6 +21,7 @@ import torch
 from flextensor import state_handler as state_handler_module
 from flextensor.collectors import LayerStatistics, TensorStatistics
 from flextensor.host_pinning import HostPinner
+from flextensor.loaders import _compute_preload
 from flextensor.state_handler import (
     StateValidationResult,
     TensorManagerState,
@@ -387,6 +388,27 @@ class TestRestoreStateWithValidation:
         self.mock_tm.loader_type = "strategy"
 
         self.handler = TensorManagerStateHandler(self.mock_tm)
+
+    @pytest.mark.parametrize("as_dict", [False, True])
+    def test_restore_state_keeps_permanent_parameters_available_for_preload(self, as_dict):
+        """The strategy loader must receive the parameters its preload plan references."""
+        state = create_mock_state(self.model_tensor_names, model=self.model)
+        permanent_names = {"layer1.weight", "layer1.bias"}
+        for strategy in (state.load_strategy, state.release_strategy):
+            strategy["layer_0"] = [stat for stat in strategy["layer_0"] if stat.name not in permanent_names]
+        state.gpu_tensors_names = sorted(permanent_names)
+        state.validate_internal()
+        parameters = dict(self.model.named_parameters())
+
+        self.handler.restore_state(parameters if as_dict else self.model, state)
+
+        restored = self.mock_tm.tensor_manager_state
+        preload_ids = _compute_preload(restored.stats, restored.load_strategy)
+        assert preload_ids == {id(parameters[name]) for name in permanent_names}
+        for name in permanent_names:
+            tensor_id = id(parameters[name])
+            assert self.mock_tm.tensors_map[tensor_id] is parameters[name]
+            assert tensor_id in self.mock_tm.traced_tensors
 
     def test_restore_state_strict_raises_on_missing(self):
         """restore_state with strict=True raises on missing tensors."""
