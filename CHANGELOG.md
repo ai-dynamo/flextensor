@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve shared hook registrations and their removable handles across offload
+  phase transitions, preventing duplicate hook execution and incorrect outputs.
+
 ## [0.4.0] — 2026-08-17
 
 ### Added
