@@ -10,7 +10,6 @@
 set -xeo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 
 # Default seed for reproducibility
 DEFAULT_SEED=42

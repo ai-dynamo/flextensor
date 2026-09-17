@@ -8,7 +8,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 # shellcheck source=../_install_requirements.sh
 source "$SCRIPT_DIR/../_install_requirements.sh"
-export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 
 # Install example dependencies (same path as users)
 bash "$REPO_ROOT/examples/vllm/install.sh"

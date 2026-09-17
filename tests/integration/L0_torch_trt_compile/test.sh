@@ -7,7 +7,6 @@
 set -xeo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 
 # Verify torch_tensorrt is available
 python -c "import torch_tensorrt; print(f'torch_tensorrt {torch_tensorrt.__version__}')" || {
