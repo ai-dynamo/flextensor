@@ -1193,15 +1193,21 @@ class TensorManagerStateHandler:
         for name in state.view_tensors_names:
             offload_keys.add(name)
 
-        # Restore tensors_map to only the tensors in the profile (load_strategy + view_tensors).
+        # Strategy loaders also materialize permanent parameters through their
+        # preload map. Omitting those parameters leaves a restored CPU model
+        # without GPU copies when inference traps access them.
+        loader_tensor_names = offload_keys
+        if state.loader_type == "strategy":
+            loader_tensor_names = offload_keys.union(state.gpu_tensors_names)
+
         tensors_map = {}
         if isinstance(model, torch.nn.Module):
             for name, tensor in model.named_parameters():
-                if name in offload_keys:
+                if name in loader_tensor_names:
                     tensors_map[id(tensor)] = tensor
         elif isinstance(model, dict):
             for name, tensor in model.items():
-                if name in offload_keys:
+                if name in loader_tensor_names:
                     tensors_map[id(tensor)] = tensor
         tm.tensors_map = tensors_map
         # Align traced_tensors with the tensors we actually manage (traps use this for load decisions).

@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Restore permanent-parameter preloading when loading a strategy offload profile
+  into a CPU model, preventing device-mismatch errors on the first inference call.
+
 ## [0.4.0] — 2026-08-17
 
 ### Added
