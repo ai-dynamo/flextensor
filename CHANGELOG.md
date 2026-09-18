@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Prevent duplicate hook calls and broken hook removal across offload model
+  swaps. Keep late-registered backward hooks active.
 - Prevent an invalid `request_strategy_replan()` from discarding the progress or
   the recorded failure of an earlier replan. Requests that cannot run now warn
   and return `0` instead of restarting measurement.

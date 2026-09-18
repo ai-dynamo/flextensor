@@ -970,7 +970,10 @@ class OffloadManager:
             # them changes the hook signature (e.g. drops kwargs) and breaks callers.
             forward_hooks_with_kwargs = getattr(old_module, "_forward_hooks_with_kwargs", {})
             forward_hooks_always_called = getattr(old_module, "_forward_hooks_always_called", {})
-            if forward_hooks := getattr(old_module, "_forward_hooks", None):
+            # Model copies may already share hook registries. Re-registering
+            # duplicates callbacks and leaves entries the original handle cannot remove.
+            forward_hooks = getattr(old_module, "_forward_hooks", None)
+            if forward_hooks and forward_hooks is not getattr(new_module, "_forward_hooks", None):
                 for hook_id, hook_fn in list(forward_hooks.items()):
                     if getattr(hook_fn, "_ft_state_update_hook", False):
                         continue
@@ -981,7 +984,8 @@ class OffloadManager:
                     )
 
             forward_pre_hooks_with_kwargs = getattr(old_module, "_forward_pre_hooks_with_kwargs", {})
-            if forward_pre_hooks := getattr(old_module, "_forward_pre_hooks", None):
+            forward_pre_hooks = getattr(old_module, "_forward_pre_hooks", None)
+            if forward_pre_hooks and forward_pre_hooks is not getattr(new_module, "_forward_pre_hooks", None):
                 for hook_id, hook_fn in list(forward_pre_hooks.items()):
                     new_module.register_forward_pre_hook(
                         hook_fn,
@@ -989,12 +993,19 @@ class OffloadManager:
                     )
 
             # Transfer backward hooks (create list copy to avoid mutation during iteration)
-            if backward_hooks := getattr(old_module, "_backward_hooks", None):
-                for _, hook_fn in list(backward_hooks.items()):
-                    new_module.register_full_backward_hook(hook_fn)
+            backward_hooks = getattr(old_module, "_backward_hooks", None)
+            if backward_hooks:
+                if backward_hooks is getattr(new_module, "_backward_hooks", None):
+                    # Late registration updates the shared registry but only one module's mode.
+                    if new_module._is_full_backward_hook is None:  # noqa: SLF001
+                        new_module._is_full_backward_hook = old_module._is_full_backward_hook  # noqa: SLF001
+                else:
+                    for _, hook_fn in list(backward_hooks.items()):
+                        new_module.register_full_backward_hook(hook_fn)
 
             # Transfer backward pre-hooks (create list copy to avoid mutation during iteration)
-            if backward_pre_hooks := getattr(old_module, "_backward_pre_hooks", None):
+            backward_pre_hooks = getattr(old_module, "_backward_pre_hooks", None)
+            if backward_pre_hooks and backward_pre_hooks is not getattr(new_module, "_backward_pre_hooks", None):
                 for _, hook_fn in list(backward_pre_hooks.items()):
                     if hasattr(new_module, "register_full_backward_pre_hook"):
                         new_module.register_full_backward_pre_hook(hook_fn)
