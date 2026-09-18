@@ -16,9 +16,11 @@ Structure: `integration/L{0,1,2}_<name>/` — each directory contains `.dockerim
 
 Leave `CUDA_VISIBLE_DEVICES` unchanged, including when it is unset. GPU selection belongs to the runner/CI or local caller; for a local single-GPU run, use `CUDA_VISIBLE_DEVICES=0 ./test.sh`.
 
+GPU checks and diagnostics run once in `tests/integration/conftest.py`.
+Do not duplicate them in shell wrappers.
+
 ```bash
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-nvidia-smi >/dev/null 2>&1 || { echo "ERROR: No GPU."; exit 1; }
 [ -z "${CI:-}" ] && [ -f "$SCRIPT_DIR/requirements.txt" ] && pip install -r "$SCRIPT_DIR/requirements.txt" --quiet
 PYTEST_ARGS=(-v -rA -s --tb=short --maxfail=3 --durations=10)
 [ -n "${PYTEST_MARKER:-}" ] && PYTEST_ARGS+=(-m "$PYTEST_MARKER")

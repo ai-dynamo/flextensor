@@ -23,6 +23,22 @@ Whole-model `torch.compile` is not supported for correct output: rolling GPU
 weight slots can alias inside one monolithic graph. With `compile_fn`, FlexTensor
 applies compile at the same granularity as offload automatically.
 
+## Inductor compatibility
+
+Some Inductor builds lose mutation-renamed reads from tiling scores, changing
+compiled output. FlexTensor corrects the known source pattern when constructing
+compiled-offload forwards, before profiling. The defect exists in Torch 2.10
+and 2.14; numerical effects depend on the graph, device, shapes, and layouts.
+
+The correction changes Inductor's Python function for the rest of the process.
+It preserves installed files and model parameters. A suffix added when graph
+cache keys are built prevents reuse of pre-fix graphs, even after caller config
+contexts exit. The caller's global cache tag stays unchanged.
+Plain imports and eager-only offload do not activate it.
+Known-fixed code is left alone; unknown code is left alone with a warning.
+Verify output parity on unrecognized builds. An upstream fix should eventually
+replace this private-API workaround.
+
 ## Recommended: `compile_fn`
 
 Pass any `module -> module` callable to `offload()`. With default

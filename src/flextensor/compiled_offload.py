@@ -209,6 +209,9 @@ def build_compiled_offload_forward(
     stable offload-unit name.
     """
     from flextensor import custom_ops as _ft_custom_ops
+    from flextensor.compiler_utils import patch_inductor_mutation_reads
+
+    patch_inductor_mutation_reads()
 
     def compiled_offload_forward(self_module, *args, **kwargs):
         dep_input = _resolve_compiled_offload_dep_input(args, kwargs)

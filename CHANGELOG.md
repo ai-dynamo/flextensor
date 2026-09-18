@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fix diffusion output differences caused by compiled offload on affected
+  PyTorch builds. Warn when the compatibility fix cannot recognize the build.
 - Prevent duplicate hook calls and broken hook removal across offload model
   swaps. Keep late-registered backward hooks active.
 - Prevent an invalid `request_strategy_replan()` from discarding the progress or
