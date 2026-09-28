@@ -1535,29 +1535,46 @@ class TensorManager:
             release_tensor_memory=release_tensor_memory,
         )
 
-        self.tensor_layer_loader = tensor_loader_class(
-            self.stats,
-            self.device_gpu,
-            label_to_block_id,
-            transfer_to_compute_map,
-            allocation_controller=block_controller,
-            offload_timing_collector=self._make_offload_timing_collector(),
-            piecewise_prefetch_policy=self._make_piecewise_prefetch_policy(),
-        )
+        tensor_layer_loader = None
+        try:
+            tensor_layer_loader = tensor_loader_class(
+                self.stats,
+                self.device_gpu,
+                label_to_block_id,
+                transfer_to_compute_map,
+                allocation_controller=block_controller,
+                offload_timing_collector=self._make_offload_timing_collector(),
+                piecewise_prefetch_policy=self._make_piecewise_prefetch_policy(),
+            )
+            self.tensor_layer_loader = tensor_layer_loader
+
+            if prepare_state:
+                tensor_manager_state = self.prepare_tensor_manager_state(
+                    self.loader_type,
+                    allocation_ordered,
+                    {},  # label_to_size_map is empty for allocation block loader
+                    data.block_sizes,
+                    self.load_strategy,
+                    {},  # release_strategy is empty for block loaders
+                    label_to_block_id,
+                    self.stats,
+                    transfer_to_compute_map,
+                    shm_block_name_map=block_controller.shm_block_name_map,
+                )
+        except BaseException as primary_error:
+            if tensor_layer_loader is not None and getattr(self, "tensor_layer_loader", None) is tensor_layer_loader:
+                self.tensor_layer_loader = None
+            try:
+                block_controller.abort_construction(primary_error)
+            except BaseException:
+                # abort_construction retains retryable handles on the primary
+                # error. Cleanup must not replace the wrapper failure.
+                logger.warning("Allocation-block loader construction cleanup is incomplete", exc_info=True)
+            raise
 
         if prepare_state:
-            self.tensor_manager_state = self.prepare_tensor_manager_state(
-                self.loader_type,
-                allocation_ordered,
-                {},  # label_to_size_map is empty for allocation block loader
-                data.block_sizes,
-                self.load_strategy,
-                {},  # release_strategy is empty for block loaders
-                label_to_block_id,
-                self.stats,
-                transfer_to_compute_map,
-                shm_block_name_map=block_controller.shm_block_name_map,
-            )
+            self.tensor_manager_state = tensor_manager_state
+        block_controller.commit_construction()
 
     def _benchmark_tensor_statistics(self) -> dict[int, TensorStatistics]:
         """
@@ -2252,7 +2269,36 @@ class TensorManager:
                     )
                     set_tensor_data(tensor, restored_data)
 
-    def shutdown(self) -> None:  # noqa: C901
+    def _discard_block_loader_tensor_data(self) -> None:
+        """Detach managed tensors from loader-owned storage without copying values.
+
+        This is only safe when the caller explicitly discards the model.
+        Rebinding projected loader views to empty tensors lets controller
+        teardown release its rolling GPU blocks and CPU SHM blocks without
+        first cloning every shared weight into private storage.
+        """
+        controller = getattr(self.tensor_layer_loader, "allocation_controller", None)
+        if not isinstance(controller, (AllocationBlockController, RawBlockController)):
+            return
+
+        for tensor_id, loader_view in controller.tensor_id_to_view_map.items():
+            tensor = self.tensors_map[tensor_id]
+            current_data = get_tensor_data(tensor)
+            current_storage = current_data.untyped_storage()._cdata  # noqa: SLF001
+            loader_storage = loader_view.untyped_storage()._cdata  # noqa: SLF001
+            if current_storage == loader_storage:
+                discarded_data = torch.empty(0, dtype=current_data.dtype, device=current_data.device)
+                set_tensor_data(tensor, discarded_data)
+
+    def shutdown(self, *, preserve_model: bool = True) -> None:  # noqa: C901
+        """Release TensorManager resources.
+
+        Args:
+            preserve_model: Restore loader-managed tensor values before
+                releasing their backing blocks. When ``False``, detach those
+                tensors without copying their values; the model is unusable
+                afterward and must be discarded.
+        """
         class_restore_error: Exception | None = None
         for module, original_class in reversed(list(self._in_place_original_classes.items())):
             try:
@@ -2265,7 +2311,10 @@ class TensorManager:
         if class_restore_error is not None:
             raise class_restore_error
 
-        self._restore_block_loader_tensor_data()
+        if preserve_model:
+            self._restore_block_loader_tensor_data()
+        else:
+            self._discard_block_loader_tensor_data()
         teardown_error: Exception | None = None
         try:
             # If a view-mode profile is still in flight, restore ``.data`` first
@@ -2412,6 +2461,11 @@ class TensorManager:
                     self.traced_tensors.add(tensor_id)
 
     def _prepare_view_model_from_id_to_view_map(self, model, tensor_id_to_view_map):
+        mapped_meta_tensor_ids = {
+            tensor_id
+            for tensor_id in tensor_id_to_view_map
+            if (tensor := self.tensors_map.get(tensor_id)) is not None and tensor.is_meta
+        }
         move_to_gpu_processor = MoveUnmappedTensorsToGPUProcessor(self.device_gpu, tensor_id_to_view_map)
         move_to_gpu_processor.apply(model)
 
@@ -2426,6 +2480,30 @@ class TensorManager:
 
         replace_tensor_processor = TensorReplacementProcessor(tensor_id_to_view_map)
         replace_tensor_processor.apply(model)
+
+        if mapped_meta_tensor_ids:
+            if isinstance(model, torch.nn.Module):
+                live_tensors = dict(model.named_parameters())
+            elif isinstance(model, dict):
+                live_tensors = model
+            else:
+                live_tensors = {}
+
+            refreshed_tensors_map = dict(self.tensors_map)
+            for tensor_id in mapped_meta_tensor_ids:
+                tensor_name = self.tensor_id_to_name_map.get(tensor_id)
+                replacement = live_tensors.get(tensor_name) if tensor_name is not None else None
+                if not isinstance(replacement, torch.Tensor) or replacement.is_meta:
+                    raise RuntimeError(
+                        "Mapped meta tensor was not materialized in the final model: "
+                        f"tensor_id={tensor_id}, name={tensor_name!r}"
+                    )
+                # Controller/state mappings intentionally retain the original
+                # profile id. Only refresh the value so teardown and any other
+                # ownership-sensitive path operate on the live Parameter that
+                # replaced the meta placeholder.
+                refreshed_tensors_map[tensor_id] = replacement
+            self.tensors_map = refreshed_tensors_map
 
     def prepare_view_model(self, model):
         new_model = model

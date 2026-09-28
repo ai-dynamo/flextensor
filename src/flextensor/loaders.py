@@ -11,6 +11,7 @@ import torch
 from flextensor.allocation_block import AllocationBlock, AllocationManager
 from flextensor.compiler_utils import disable as _compiler_disable
 from flextensor.compiler_utils import is_compiling as _is_compiling
+from flextensor.construction_rollback import ConstructionRollback
 from flextensor.core.transfer import (
     CudaTransferRuntime,
     TransferTicket,
@@ -32,6 +33,7 @@ from .utils import clear_and_delete_tensor, delete_tensor, is_dense_layout
 LOGGER = logging.getLogger(__name__)
 
 TransferStreamSynchronizationError = _TransferStreamSynchronizationError
+_CONSTRUCTION_CLEANUP_ATTEMPTS = 2
 
 
 # =============================================================================
@@ -1090,7 +1092,7 @@ class RawBlockController:
 
 @instrumentable
 class AllocationBlockController:
-    def __init__(
+    def __init__(  # noqa: C901 - allocation and rollback form one construction transaction.
         self,
         allocation_ordered: dict[int, list[str]],
         device_gpu: torch.device,
@@ -1111,61 +1113,169 @@ class AllocationBlockController:
         self.device_gpu_str = self._format_device_str(device_gpu)
         self.block_map_gpu = {}  # block_id to gpu block
         self.label_to_gpu_block = {}
-        self.use_shm = use_shm
-        self.load_model_from_shm = use_shm and shm_block_name_map is not None
-        self.shm_block_name_map = shm_block_name_map or {}
-        self._block_name_fn = block_name_fn or (lambda index: f"ft_{os.getpid()}_{index}")
-        self.host_pinner = host_pinner
-        # When True (inference default), each source weight in ``tensors_map`` is
-        # freed right after being copied into its pinned CPU block, to keep peak
-        # host memory low. A profiling-phase controller built to measure the
-        # *compiled* per-layer timings must pass False: the strategy is recomputed
-        # from those timings and a second (destructive) controller is built from
-        # ``tensors_map`` afterwards, so the source weights must survive this build.
-        self.release_tensor_memory = release_tensor_memory
-
-        for index, (_block_id, layers) in enumerate(allocation_ordered.items()):
-            shm_prefix = None
-            if self.use_shm:
-                if layers[0] not in self.shm_block_name_map:
-                    shm_prefix = self._block_name_fn(index)
-                else:
-                    shm_prefix = self.shm_block_name_map[layers[0]]
-            allocation_manager = AllocationManager(
-                shm_block_name_prefix=shm_prefix,
-                load_from_shm=self.load_model_from_shm,
-                pinned_memory=True,
-                host_pinner=self.host_pinner,
-                release_tensor_memory=self.release_tensor_memory,
-            )
-            for label in layers:
-                if self.use_shm and label not in self.shm_block_name_map:
-                    self.shm_block_name_map[label] = shm_prefix
-                strategy = strategy_map[label]
-                if len(strategy) == 0:
-                    continue
-                block = allocation_manager.block()
-                self.block_map_cpu[label] = block
-                # _add_tensors calls block.allocate(), which releases each tensor's
-                # storage immediately after copying because release_tensor_memory=True.
-                tensor_ids_list = self._add_tensors(label, strategy, tensors_map, block)
-                self.label_to_cpu_tensor_id_map[label] = tensor_ids_list
-
-            gpu_block = allocation_manager.create_max_block(device=self.device_gpu_str)
-            for label in layers:
-                self.label_to_gpu_block[label] = gpu_block
-
         self.label_to_tensor_views_map = {}
         self.gpu_block_view_map = {}
-        for label, cpu_block in self.block_map_cpu.items():
-            gpu_block = self.label_to_gpu_block[label]
-            gpu_tensor_views, gpu_block_view = cpu_block.project_views(gpu_block)
-            self.label_to_tensor_views_map[label] = gpu_tensor_views
-            block_id = label_to_block_id[label]
-            self.block_map_gpu[block_id] = gpu_block_view  # TODO: REMOVE!
-            self.gpu_block_view_map[label] = gpu_block_view
+        self.tensor_id_to_view_map: dict[int, torch.Tensor] = {}
+        self.use_shm = use_shm
+        self.load_model_from_shm = use_shm and shm_block_name_map is not None
+        # Treat the caller's profile map as input. Publishing names into it
+        # incrementally would leave a failed construction looking complete to
+        # a later retry.
+        self.shm_block_name_map = dict(shm_block_name_map or {})
+        self._block_name_fn = block_name_fn or (lambda index: f"ft_{os.getpid()}_{index}")
+        self.host_pinner = host_pinner
+        # When True (inference default), source weights are released as they are
+        # copied into pinned CPU blocks. Compiled re-plan profiling disables this
+        # so a second, destructive controller can be built from the same tensors.
+        self.release_tensor_memory = release_tensor_memory
+        # Every successfully returned block enters this sole ownership ledger.
+        self._owned_blocks: list[AllocationBlock] = []
+        self._construction_rollback = ConstructionRollback()
 
-        self.prepare_tensor_id_to_view_mapping()
+        try:
+            if release_tensor_memory and not self.load_model_from_shm:
+                self._validate_source_storage(allocation_ordered, strategy_map, tensors_map)
+            for index, (_block_id, layers) in enumerate(allocation_ordered.items()):
+                shm_prefix = None
+                if self.use_shm:
+                    if layers[0] not in self.shm_block_name_map:
+                        shm_prefix = self._block_name_fn(index)
+                    else:
+                        shm_prefix = self.shm_block_name_map[layers[0]]
+                allocation_manager = AllocationManager(
+                    shm_block_name_prefix=shm_prefix,
+                    load_from_shm=self.load_model_from_shm,
+                    pinned_memory=True,
+                    host_pinner=self.host_pinner,
+                    release_tensor_memory=self.release_tensor_memory,
+                )
+                for label in layers:
+                    if self.use_shm and label not in self.shm_block_name_map:
+                        self.shm_block_name_map[label] = shm_prefix
+                    strategy = strategy_map[label]
+                    if len(strategy) == 0:
+                        continue
+                    block = allocation_manager.block()
+                    # Record ownership before allocation or map publication:
+                    # allocate() is where CPU SHM is created/attached and may
+                    # fail after acquiring the handle.
+                    self._owned_blocks.append(block)
+                    if release_tensor_memory and not self.load_model_from_shm:
+                        self._construction_rollback.record(block, strategy, tensors_map)
+                    # _add_tensors calls block.allocate(), which may release each
+                    # source tensor according to release_tensor_memory.
+                    tensor_ids_list = self._add_tensors(label, strategy, tensors_map, block)
+                    self.block_map_cpu[label] = block
+                    self.label_to_cpu_tensor_id_map[label] = tensor_ids_list
+
+                gpu_block = allocation_manager.create_max_block(device=self.device_gpu_str)
+                self._owned_blocks.append(gpu_block)
+                for label in layers:
+                    self.label_to_gpu_block[label] = gpu_block
+
+            for label, cpu_block in self.block_map_cpu.items():
+                gpu_block = self.label_to_gpu_block[label]
+                gpu_tensor_views, gpu_block_view = cpu_block.project_views(gpu_block)
+                self.label_to_tensor_views_map[label] = gpu_tensor_views
+                block_id = label_to_block_id[label]
+                self.block_map_gpu[block_id] = gpu_block_view  # TODO: REMOVE!
+                self.gpu_block_view_map[label] = gpu_block_view
+
+            self.prepare_tensor_id_to_view_mapping()
+        except BaseException as primary_error:
+            protected_blocks = self._construction_rollback.restore(attempts=_CONSTRUCTION_CLEANUP_ATTEMPTS)
+            protected_block_ids = {id(block) for block in protected_blocks}
+            releasable_blocks = [block for block in self._owned_blocks if id(block) not in protected_block_ids]
+            failed_releases = self._release_blocks(
+                releasable_blocks,
+                attempts=_CONSTRUCTION_CLEANUP_ATTEMPTS,
+            )
+            self._owned_blocks = [*protected_blocks, *failed_releases]
+            self._clear_allocation_maps()
+            self.shm_block_name_map.clear()
+            if self._owned_blocks:
+                self._attach_cleanup_controller(primary_error)
+            raise
+
+    @staticmethod
+    def _validate_source_storage(
+        allocation_ordered: dict[int, list[str]],
+        strategy_map: dict[str, list[TensorStatistics]],
+        tensors_map: Mapping[int, torch.Tensor],
+    ) -> None:
+        """Reject unsupported storage groups before any source tensor is released."""
+        managed_ids = {
+            id(tensors_map[info.tensor_id])
+            for layers in allocation_ordered.values()
+            for label in layers
+            for info in strategy_map.get(label, ())
+        }
+        sources = {
+            id(tensor): tensor
+            for tensor in tensors_map.values()
+            if not tensor.is_meta and tensor.layout == torch.strided
+        }
+        shared_ids = _RawTensorDataBinder._find_shared_storage_ids(sources)  # noqa: SLF001
+        for tensor_id in managed_ids:
+            if tensor_id in shared_ids:
+                # Disjoint views are normal after release() transfers packed
+                # CPU storage back to the model. Only overlap is unsupported.
+                raise ValueError(
+                    "Block loaders cannot preserve distinct tensor views sharing storage with overlapping byte regions "
+                    f"(tensor ids {sorted(shared_ids[tensor_id])}); use the strategy loader"
+                )
+
+    @staticmethod
+    def _release_blocks(
+        blocks: list[AllocationBlock],
+        *,
+        attempts: int,
+    ) -> list[AllocationBlock]:
+        """Release owned blocks with bounded retries for staged teardown."""
+        pending = list(reversed(blocks))
+        for _attempt in range(attempts):
+            if not pending:
+                break
+            failed: list[AllocationBlock] = []
+            for block in pending:
+                try:
+                    block.release()
+                except BaseException:
+                    # Construction cleanup must never replace the primary
+                    # failure. Failed staged handles remain reachable below.
+                    LOGGER.warning("Failed to release allocation block during cleanup", exc_info=True)
+                    failed.append(block)
+            pending = failed
+        pending.reverse()
+        return pending
+
+    def _attach_cleanup_controller(
+        self,
+        primary_error: BaseException,
+        cleanup_error: BaseException | None = None,
+    ) -> None:
+        """Keep retryable handles reachable without replacing the primary error."""
+        try:
+            primary_error.__dict__["_flextensor_cleanup_controller"] = self
+            if cleanup_error is not None:
+                primary_error.__dict__["_flextensor_cleanup_error"] = cleanup_error
+            add_note = getattr(primary_error, "add_note", None)
+            if callable(add_note):
+                add_note(
+                    "FlexTensor construction cleanup is incomplete; call "
+                    "exception._flextensor_cleanup_controller.shutdown() to retry it."
+                )
+        except BaseException:
+            LOGGER.exception("Could not attach retryable cleanup handles to the primary error")
+
+    def _clear_allocation_maps(self) -> None:
+        self.block_map_cpu.clear()
+        self.label_to_cpu_tensor_id_map.clear()
+        self.block_map_gpu.clear()
+        self.label_to_gpu_block.clear()
+        self.label_to_tensor_views_map.clear()
+        self.gpu_block_view_map.clear()
+        self.tensor_id_to_view_map.clear()
 
     def _add_tensors(
         self,
@@ -1238,31 +1348,37 @@ class AllocationBlockController:
         gpu_block_view = self.gpu_block_view_map[label]
         cpu_block.copy_to(gpu_block_view, non_blocking=non_blocking)
 
+    def commit_construction(self) -> None:
+        """Discard rollback metadata after a transfer loader assumes ownership."""
+        self._construction_rollback.commit()
+
+    def abort_construction(self, primary_error: BaseException | None = None) -> None:
+        """Restore source tensors and release resources after handoff failure."""
+        try:
+            self.shutdown()
+        except BaseException as cleanup_error:
+            if primary_error is not None:
+                self._attach_cleanup_controller(primary_error, cleanup_error)
+            raise
+
     def shutdown(self) -> None:
-        for block in self.block_map_cpu.values():
-            block.release()
-        self.block_map_cpu.clear()
-        self.block_map_gpu.clear()
-        self.label_to_gpu_block.clear()
-        self.gpu_block_view_map.clear()
-        self.label_to_tensor_views_map.clear()
-        self.label_to_cpu_tensor_id_map.clear()
-        self.tensor_id_to_view_map.clear()
+        protected_blocks = self._construction_rollback.restore(attempts=_CONSTRUCTION_CLEANUP_ATTEMPTS)
+        protected_block_ids = {id(block) for block in protected_blocks}
+        failed_releases = self._release_blocks(
+            [block for block in self._owned_blocks if id(block) not in protected_block_ids],
+            attempts=_CONSTRUCTION_CLEANUP_ATTEMPTS,
+        )
+        self._owned_blocks = [*protected_blocks, *failed_releases]
+        self._clear_allocation_maps()
+        if self._owned_blocks:
+            raise RuntimeError(
+                f"AllocationBlockController cleanup remains incomplete for {len(self._owned_blocks)} block(s)"
+            )
 
     def release_gpu_blocks(self) -> None:
-        """Drop every reference to this controller's GPU block allocations.
-
-        ``shutdown`` only frees the pinned CPU blocks; the GPU block storage is
-        kept alive by ``label_to_gpu_block`` (the full blocks) and the view maps
-        (``block_map_gpu``/``gpu_block_view_map``/``label_to_tensor_views_map``/
-        ``tensor_id_to_view_map``) that alias into them. Clearing all of these
-        returns the segments to the caching allocator's free pool so the next
-        allocation (e.g. a re-plan's rebuilt loader) can reuse them, keeping peak
-        GPU memory at ~1x instead of holding old+new blocks simultaneously.
-
-        Caller contract: only safe once no live tensor (e.g. ``param.data``)
-        aliases these GPU views.
-        """
+        """Drop references to GPU blocks once no live tensor aliases them."""
+        gpu_block_ids = {id(block) for block in self.label_to_gpu_block.values()}
+        self._owned_blocks = [block for block in self._owned_blocks if id(block) not in gpu_block_ids]
         self.label_to_gpu_block = {}
         self.block_map_gpu = {}
         self.gpu_block_view_map = {}

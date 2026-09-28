@@ -280,7 +280,7 @@ class TensorManagerProtocol(Protocol):
     def resume_profiling(self) -> None: ...
     def pause_profiling(self) -> Any: ...
     def release_memory(self) -> None: ...
-    def shutdown(self) -> None: ...
+    def shutdown(self, *, preserve_model: bool = True) -> None: ...
 
 
 class OffloadPhase(Enum):
@@ -2319,7 +2319,15 @@ class OffloadManager:
         with self._tensor_manager.pause_profiling():
             yield
 
-    def release(self) -> None:  # noqa: C901
+    def release(self, *, preserve_model: bool = True) -> None:  # noqa: C901
+        """Release this manager and its TensorManager resources.
+
+        Args:
+            preserve_model: Restore loader-managed tensor values before
+                teardown. Set to ``False`` only when the managed model will
+                be discarded; this avoids copying loader-backed weights
+                and leaves that model unusable.
+        """
         if self._cleanup_blocked:
             raise RuntimeError(
                 "Manager cleanup is incomplete; TensorManager resources remain retained and cannot be released safely."
@@ -2336,7 +2344,10 @@ class OffloadManager:
             except Exception as error:
                 teardown_error = error
             try:
-                self._tensor_manager.shutdown()
+                if preserve_model:
+                    self._tensor_manager.shutdown()
+                else:
+                    self._tensor_manager.shutdown(preserve_model=False)
             except Exception as error:
                 if teardown_error is None:
                     teardown_error = error
@@ -2668,14 +2679,16 @@ def offload_block(block_name: str, name: str = DEFAULT_MANAGER_NAME) -> Any:
     return om.offload_block(block_name)
 
 
-def release(name: str = DEFAULT_MANAGER_NAME):
+def release(name: str = DEFAULT_MANAGER_NAME, *, preserve_model: bool = True):
     """Release the specified offload manager.
 
     Args:
         name: Name for the offload manager. Defaults to DEFAULT_MANAGER_NAME.
+        preserve_model: Restore loader-managed tensor values before teardown.
+            Set to ``False`` only when the managed model will be discarded.
     """
     om = get_offload_manager(name)
-    om.release()
+    om.release(preserve_model=preserve_model)
 
 
 def get_gpu_memory_usage(name: str = DEFAULT_MANAGER_NAME) -> GPUMemoryUsage:

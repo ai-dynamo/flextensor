@@ -748,26 +748,44 @@ class MoveBuffersToGPUTensorProcessor(TensorProcessor):
 
 @instrumentable
 class TensorReplacementProcessor(TensorProcessor):
-    def __init__(self, tensor_id_mapping, update_nn_parameters=True):
+    """Replace mapped tensors, preserving meta Parameter subclasses.
+
+    ``parameter_factory`` can reconstruct meta parameters whose subclasses
+    require constructor arguments beyond ``data`` and ``requires_grad``.
+    """
+
+    def __init__(
+        self, tensor_id_mapping, update_nn_parameters=True, *, parameter_factory: ParameterFactory | None = None
+    ):
         super().__init__()
         self.tensor_id_mapping = tensor_id_mapping
         self.update_nn_parameters = update_nn_parameters
-        self.cache = {}
+        self.parameter_factory = parameter_factory
+        self.cache: dict[int, torch.Tensor] = {}
 
     def cleanup(self):
         self.cache = {}
 
     def process(self, src):
-        if not isinstance(src, torch.Tensor) or src.is_meta:
+        if not isinstance(src, torch.Tensor):
             return src
         src_tensor_id = id(src)
         if src_tensor_id in self.cache:
             return self.cache[src_tensor_id]
         if src_tensor_id not in self.tensor_id_mapping:
-            self._process_inner_fields(src, src)
+            if not src.is_meta:
+                self._process_inner_fields(src, src)
             return src
         new_tensor = self.tensor_id_mapping[src_tensor_id]
-        if self.update_nn_parameters:
+        if src.is_meta:
+            if isinstance(src, torch.nn.parameter.Parameter):
+                # The helper leaves existing Parameters unchanged. Unwrap a
+                # mapped Parameter so the source subtype and grad flag win.
+                new_data = new_tensor.detach() if isinstance(new_tensor, torch.nn.Parameter) else new_tensor
+                new_tensor = preserve_parameter_type(
+                    src, new_data, force_update=True, parameter_factory=self.parameter_factory
+                )
+        elif self.update_nn_parameters:
             if isinstance(src, torch.nn.parameter.Parameter):
                 src.data = new_tensor
                 new_tensor = src

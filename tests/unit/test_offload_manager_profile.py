@@ -1268,6 +1268,17 @@ class TestOffloadFromState:
 
         assert events == ["release", "shutdown", "unpatch"]
 
+    def test_release_can_discard_model_without_restoring_tensor_data(self):
+        tensor_manager = MagicMock()
+        manager = OffloadManager("release-discard-model")
+        manager._tensor_manager = tensor_manager
+
+        manager.release(preserve_model=False)
+
+        tensor_manager.release_memory.assert_called_once_with()
+        tensor_manager.shutdown.assert_called_once_with(preserve_model=False)
+        assert manager._tensor_manager is None
+
     @pytest.mark.parametrize("loader_type", ["allocation_block_transfer", "raw_block_transfer"])
     def test_release_restores_block_loader_parameter_data(self, loader_type):
         model = SimpleModel().eval()

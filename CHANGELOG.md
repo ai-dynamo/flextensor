@@ -21,9 +21,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [strategy replan](docs/api/glossary.md#strategy-replan) is available and
   whether it succeeded, without affecting the run. See
   [torch.compile](docs/how-to/torch-compile.md#preflight-and-verify-the-replan).
+- Add `preserve_model=False` to `release()` for disposable models that should
+  release loader-backed weights without rebuilding private model storage.
+  The default continues to preserve the released model.
 
 ### Fixed
 
+- Allocation-block construction failures now restore released source tensors
+  and clean up partially created CPU, GPU, and SHM blocks without masking the
+  original error, including failures while constructing the transfer loader.
+  Rollback preserves storage offsets and reconnects surviving backing storage;
+  overlapping source views are rejected before source release. Disjoint views
+  in retained CPU blocks can be offloaded again and keep shared storage on rollback.
+- Materialize mapped meta tensors while preserving parameter subclasses and
+  aliases, with a parameter factory for custom constructors and track the
+  replacement tensors for model teardown.
 - Fix diffusion output differences caused by compiled offload on affected
   PyTorch builds. Warn when the compatibility fix cannot recognize the build.
 - Prevent duplicate hook calls and broken hook removal across offload model

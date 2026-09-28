@@ -302,8 +302,8 @@ class NoOpTensorManager:
     def initialize_inference(self):
         return self.model
 
-    def shutdown(self):
-        pass
+    def shutdown(self, *, preserve_model: bool = True):
+        """No-op when offloading is disabled."""
 
     def restore_state(self, model: Any, _state: Any) -> None:
         # Match TensorManager's profile-restore contract: later initialize_* calls
