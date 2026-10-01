@@ -299,10 +299,48 @@ def test_failed_construction_does_not_publish_names_and_retry_reconstructs(monke
     )
 
     assert retry.shm_block_name_map == {
-        "existing": "existing_block",
         "left": "test_block_0",
         "right": "test_block_0",
     }
+
+
+def test_shm_names_cover_only_nonempty_load_labels(monkeypatch) -> None:
+    _FakeAllocationManager.reset()
+    monkeypatch.setattr("flextensor.loaders.AllocationManager", _FakeAllocationManager)
+
+    controller = AllocationBlockController(
+        allocation_ordered={0: ["empty", "active"]},
+        device_gpu=torch.device("cpu"),
+        tensors_map={1: torch.ones(1)},
+        strategy_map={"empty": [], "active": [_tensor_stats(1, 4)]},
+        label_to_block_id={"empty": 0, "active": 0},
+        use_shm=True,
+        block_name_fn=lambda index: f"test_block_{index}",
+        host_pinner=NoOpHostPinner(),
+    )
+
+    assert controller.shm_block_name_map == {"active": "test_block_0"}
+
+
+def test_shm_follower_uses_published_name_when_first_group_label_is_empty(monkeypatch) -> None:
+    _FakeAllocationManager.reset()
+    monkeypatch.setattr("flextensor.loaders.AllocationManager", _FakeAllocationManager)
+
+    controller = AllocationBlockController(
+        allocation_ordered={0: ["empty", "active"]},
+        device_gpu=torch.device("cpu"),
+        tensors_map={1: torch.ones(1)},
+        strategy_map={"empty": [], "active": [_tensor_stats(1, 4)]},
+        label_to_block_id={"empty": 0, "active": 0},
+        use_shm=True,
+        shm_block_name_map={"active": "published_block"},
+        block_name_fn=lambda index: f"unexpected_block_{index}",
+        load_from_shm=True,
+        host_pinner=NoOpHostPinner(),
+    )
+
+    assert controller.shm_block_name_map == {"active": "published_block"}
+    assert _FakeAllocationManager.instances[0].kwargs["shm_block_name_prefix"] == "published_block"
 
 
 @pytest.mark.parametrize("placement", ["same_label", "other_block", "unmanaged"])
@@ -638,6 +676,8 @@ def test_wrapper_construction_failure_aborts_controller_and_same_tensors_retry(
     manager.rearrange_transfers = rearrange_transfers
     manager.shm_namespace = None
     manager.use_shm = False
+    manager.load_from_shm = False
+    manager.shm_owner = None
     manager.device_gpu = torch.device("cpu")
     manager.host_pinner = NoOpHostPinner()
     manager.stats = []

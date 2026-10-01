@@ -59,6 +59,8 @@ from flextensor.offload_timing import (
     OffloadTimingSnapshot,
     format_offload_timing_table,
 )
+from flextensor.shared_offload import SharedOffloadSession
+from flextensor.shm.coordinator import ShmCoordinatorError, ShmCreatorDiedError, ShmCreatorFailedError
 from flextensor.strategy import (
     AdaptiveKnapsackStrategy,
     AdaptiveStrategy,
@@ -84,6 +86,10 @@ __all__ = [  # noqa: RUF022
     "OffloadConfig",
     "OffloadManager",
     "PinnedMemoryMode",
+    "SharedOffloadSession",
+    "ShmCoordinatorError",
+    "ShmCreatorDiedError",
+    "ShmCreatorFailedError",
     "StrategyReplanStatus",
     "clear_profiling_durations",
     "collect_offload_timing",

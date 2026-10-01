@@ -218,9 +218,9 @@ When `enabled=False`, FlexTensor passes through to normal PyTorch execution with
 |--------|------|---------|-------------|
 | `pinned_memory` | bool | `True` | Use pinned memory for CPU-resident weights |
 | `pinned_memory_mode` | `"torch" \| "host_register"` | `"torch"` | How to pin: `"torch"` (`tensor.pin_memory()`, copies into a fresh pinned buffer) or `"host_register"` (`cudaHostRegister`, pins existing storage in place — lower peak host RAM). Any other value is rejected at config-construction time. |
-| `shm_enabled` | bool | `False` | Enable cross-process weight sharing via POSIX shared memory |
-| `shm_namespace` | str \| None | `None` | Base namespace for SHM blocks (auto-derived if None) |
-| `shm_wait_timeout` | float | `0.0` | Hard timeout (seconds) for followers waiting on creator |
+| `shm_enabled` | bool | `False` | Select SHM-backed allocation; applications must also coordinate creator/follower roles |
+| `shm_namespace` | str \| None | `None` | Stable base namespace for SHM blocks; required when SHM is enabled |
+| `shm_wait_timeout` | float | `0.0` | Timeout (seconds) for followers waiting on creator; `0.0` waits indefinitely |
 | `max_gpu_mem_fraction` | float \| None | `None` | GPU memory budget as a fraction of total device memory (e.g. `0.9` = 90%). `None` = latency mode (no constraint). |
 
 #### Pinned Memory
@@ -302,30 +302,87 @@ FT_MAX_GPU_MEM_FRACTION=none  # Use latency mode explicitly (also accepts "null"
 
 #### Shared Memory (Cross-Process Weight Sharing)
 
-When `shm_enabled=True`, FlexTensor stores model weights in POSIX shared memory so
-multiple processes (e.g., vLLM data-parallel replicas) can share a single copy of the
-weights in CPU RAM. The first process to start becomes the *creator* and loads the model
-normally; subsequent processes become *followers* and attach to existing shared memory
-blocks without re-loading from disk.
+`shm_enabled=True` selects POSIX-SHM allocation but does not elect a creator or
+construct followers. For workers sharing a profiled model, use
+[`SharedOffloadSession`][flextensor.shared_offload.SharedOffloadSession]. It owns
+per-manager election, publication, failure propagation, and cleanup while the
+application supplies checkpoint-loading and lightweight follower model factories.
 
 ```python
-config = OffloadConfig(shm_enabled=True)  # Enable cross-process weight sharing
+import flextensor as ft
+
+config = ft.OffloadConfig(transfer_mode="allocation_block_transfer")
+
+with ft.SharedOffloadSession("my_run", wait_timeout=3600) as session:
+    model = session.offload_from_profile(
+        "profiles/model",
+        config=config,
+        name="model",
+        creator_model_factory=load_checkpoint_model,
+        follower_model_factory=build_meta_model,
+    )
+    run_inference(model)
 ```
 
-The `shm_namespace` is auto-derived from the model path, config fields, and manager
-name, ensuring that different models, config variations, or named `OffloadManager`
-instances get separate shared memory regions. Override with an explicit namespace when
-needed:
+The application provides the two factories and `run_inference` in this example.
+Both factories must construct matching registered parameter and buffer names.
+Only the creator reads the disk profile and invokes the checkpoint factory.
+Followers wait for publication, build their model topology (normally on `meta`),
+copy resident parameters and buffers to their target device, and attach managed
+tensors to the shared CPU blocks.
 
-```python
-config = OffloadConfig(shm_enabled=True, shm_namespace="my_model_v1")
-```
+Create one session in each worker after spawning and use it from its creating
+thread. Workers in the same sharing group use the same base namespace; each
+manager `name` gets an independent, compact namespace and creator election. Use
+a different base namespace for independent launches. The session copies the
+configuration and supplies its SHM namespace without changing the caller's object.
+[`validate_options(...)`][flextensor.shared_offload.SharedOffloadSession.validate_options]
+checks namespace and timeout input without opening resources.
 
-When `shm_wait_timeout` is `0.0` (the default), followers rely on heartbeat liveness
-detection rather than a hard wall-clock timeout.
+Each manager uses one coordinator heartbeat to retain its profile and tensor
+blocks until the last participant leaves. A follower that has joined can finish
+building its model and attach the blocks after the creator closes. Sessions
+reserve their named managers until cleanup succeeds; close the session before
+reconfiguring or reusing those managers. Context exit discards disposable models
+without copying managed weights into private storage. Call
+[`close(preserve_models=True)`][flextensor.shared_offload.SharedOffloadSession.close]
+when the underlying models need to retain those values after release.
+
+Compiled forwards are supported, but strategy replanning is disabled for shared
+sessions because published blocks must remain fixed. Failed initialization
+publishes the creator error before cleanup when possible. Failed cleanup retains
+the remaining resources so `close()` can be retried.
+
+The lower-level `OffloadManager` path requires both `shm_enabled=True` and an
+explicit non-empty `shm_namespace`; its caller owns coordination and lifecycle.
+A stable model identity can first be converted with
+`flextensor.shm.compute_shm_namespace(...)`.
+
+When `shm_wait_timeout` is `0.0` (the default), the lower-level path has no overall
+wait limit. `SharedOffloadSession` defaults to 300 seconds and also accepts
+`wait_timeout=0.0` for no overall limit. Both paths check the creator heartbeat
+while initialization is in progress. Positive timeouts also bound coordination-lock
+acquisition; scheduler delays can make measured elapsed time slightly longer
+than the configured value.
 
 These options can also be set via `FT_SHM_ENABLED`, `FT_SHM_NAMESPACE`, and
 `FT_SHM_WAIT_TIMEOUT` environment variables.
+
+##### Profile restoration and publication
+
+Restoration uses an explicit creator or follower role. Creators discard saved
+SHM block names and allocate fresh blocks in the current namespace. Followers
+require the published block-name map and managed-tensor dtype, shape, and stride
+metadata; incompatible or incomplete metadata is rejected before attachment.
+Meta placeholders take their dtype and packed stride from the published state.
+
+[`TensorManager.export_state()`][flextensor.tensor_manager.TensorManager.export_state]
+rebuilds a snapshot from live allocation views and block names after restoration.
+The session publishes that snapshot rather than reusing names or tensor IDs from
+the original disk profile. Existing schema-v3 profiles may omit the additive
+dtype/layout fields: creators load them and rebuild the metadata before sharing
+with followers. Published profiles are copied during restoration so the caller's
+state object remains unchanged.
 
 ##### Low-level SHM protocol and ownership
 

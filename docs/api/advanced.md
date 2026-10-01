@@ -29,6 +29,7 @@ See [Internal Phases](../explanation/phases.md) for details on how these compone
         - load_profile
         - load_state
         - restore_state
+        - export_state
         - plan_state_adoption
         - execute_state_adoption
         - restore_adopted_state
@@ -71,6 +72,20 @@ for when to switch modes.
         - make_host_pinner
 
 ## Shared Memory
+
+[`SharedOffloadSession`][flextensor.shared_offload.SharedOffloadSession] provides
+coordinated loading from profiles with application-supplied creator and follower
+model factories. See
+[Shared Memory](../explanation/configuration.md#shared-memory-cross-process-weight-sharing)
+for session setup, restoration, and cleanup.
+
+::: flextensor.shared_offload.SharedOffloadSession
+    options:
+      members:
+        - validate_options
+        - namespace_for
+        - offload_from_profile
+        - close
 
 Coordination, shared ownership, and resident tensor storage for cross-process
 weight sharing. See

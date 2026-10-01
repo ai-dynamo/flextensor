@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `SharedOffloadSession` for coordinated loading from profiles. The elected
+  creator loads checkpoint data and publishes live state; followers build model
+  skeletons and attach shared weights. Sessions reserve named managers and retain
+  resources until cleanup succeeds.
+- Add `TensorManager.export_state()` to publish current tensor IDs, shared block
+  names, and managed-tensor dtypes, shapes, and strides. Existing schema-v3 disk
+  profiles remain loadable by creators, which rebuild this metadata at runtime.
 - Add `flextensor.shm.tensor_store.SharedTensorStore` for publishing resident
   parameters and registered buffers in shared memory. Followers validate the
   manifest and copy tensors to their target device while preserving aliases.
@@ -30,6 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** `OffloadConfig(shm_enabled=True)` requires an explicit, non-empty
+  `shm_namespace`. Use `SharedOffloadSession` to manage creator/follower election,
+  per-manager namespaces, publication, and cleanup.
 - **Breaking:** Upgrade the SHM protocol from v3 to v4, with unique participant
   identities and explicit `INITIALIZING`, `READY`, and `FAILED` coordinator
   states. All participants must use the same version and restart together.
@@ -40,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Restore SHM profiles with an explicit creator or follower role. Creators discard
+  saved block names and publish fresh allocations; followers validate published
+  metadata before attaching. Failed restoration retains unfinished cleanup and
+  prevents manager reuse until it succeeds.
 - Propagate creator initialization failures and expired heartbeats to waiting
   followers, with optional bounded waits. Publish readiness in the coordinator
   header instead of a separate per-block ready notification.

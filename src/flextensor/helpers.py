@@ -14,6 +14,7 @@ from flextensor.types import GPUMemoryUsage
 
 if TYPE_CHECKING:
     from flextensor.offload_manager import TensorManagerProtocol as _TensorManagerProtocol
+    from flextensor.state_handler import TensorManagerState
 
 
 def format_tensor_id_hint(
@@ -216,7 +217,10 @@ class NoOpTensorManager:
         self.tensors_map = {}
         self.traced_tensors = set()
         self.loader_type = ""
+        self.use_shm = False
+        self.load_from_shm = False
         self.shm_namespace: str | None = None
+        self.shm_owner: Any = None
         self.stats: list[Any] = []
 
     def build_parameters_mapping(self, _model):
@@ -305,9 +309,10 @@ class NoOpTensorManager:
     def shutdown(self, *, preserve_model: bool = True):
         """No-op when offloading is disabled."""
 
-    def restore_state(self, model: Any, _state: Any) -> None:
+    def restore_state(self, model: Any, _state: Any, *, load_from_shm: bool = False) -> None:
         # Match TensorManager's profile-restore contract: later initialize_* calls
         # return the model associated with the restored state.
+        self.load_from_shm = load_from_shm
         self.model = model
 
     def plan_state_adoption(self, _model: Any, _state: Any) -> Any:
@@ -320,6 +325,9 @@ class NoOpTensorManager:
 
     def restore_adopted_state(self, model: Any, _state: Any) -> None:
         self.model = model
+
+    def export_state(self) -> TensorManagerState:
+        raise RuntimeError("Cannot export state when offloading is disabled")
 
     def save_profile(self, _profile_directory: str) -> None:
         pass

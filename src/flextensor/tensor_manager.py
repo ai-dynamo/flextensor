@@ -62,6 +62,7 @@ from flextensor.offload_timing import (
 )
 from flextensor.piecewise_prefetch_policy import PiecewisePrefetchPolicy
 from flextensor.profile_block_controller import ProfileBlockController
+from flextensor.shm.flexible_shm import FlexibleSharedMemory  # noqa: TC001 - beartype checks attribute assignments
 from flextensor.state_adoption import PinningMode, target_from_profile
 from flextensor.state_handler import (
     LoaderInputData,
@@ -562,7 +563,9 @@ class TensorManager:
         self.tensor_id_to_name_map: dict[int, str] = {}
         self.tensor_manager_state: Any = None
         self.use_shm = use_shm
+        self.load_from_shm = False
         self.shm_namespace: str | None = None
+        self.shm_owner: FlexibleSharedMemory | None = None
         self._unmapped_tensors_bytes = 0
         self.module_tracker: ModuleTracker | None = None
         self._non_offloaded_tensors_moved = False
@@ -1531,6 +1534,8 @@ class TensorManager:
             use_shm=self.use_shm,
             shm_block_name_map=data.shm_block_name_map,
             block_name_fn=block_name_fn,
+            load_from_shm=self.load_from_shm,
+            shm_owner=self.shm_owner,
             host_pinner=self.host_pinner,
             release_tensor_memory=release_tensor_memory,
         )
@@ -1559,7 +1564,7 @@ class TensorManager:
                     label_to_block_id,
                     self.stats,
                     transfer_to_compute_map,
-                    shm_block_name_map=block_controller.shm_block_name_map,
+                    shm_block_name_map=(block_controller.shm_block_name_map if self.use_shm else None),
                 )
         except BaseException as primary_error:
             if tensor_layer_loader is not None and getattr(self, "tensor_layer_loader", None) is tensor_layer_loader:
@@ -1575,6 +1580,11 @@ class TensorManager:
         if prepare_state:
             self.tensor_manager_state = tensor_manager_state
         block_controller.commit_construction()
+        # Creator/follower is a one-build role. Retaining follower mode would
+        # make a later fresh offload on this reusable TensorManager attach stale
+        # namespace blocks. The controller keeps its own immutable role for
+        # teardown; failures above leave this flag intact so callers can retry.
+        self.load_from_shm = False
 
     def _benchmark_tensor_statistics(self) -> dict[int, TensorStatistics]:
         """
@@ -1946,10 +1956,55 @@ class TensorManager:
             shm_block_name_map=shm_block_name_map,
         )
 
-    def restore_state(self, model, state):
+    def restore_state(self, model: Any, state: Any, *, load_from_shm: bool = False) -> None:
         """Delegate to TensorManagerStateHandler for state restoration."""
         state_handler = TensorManagerStateHandler(self)
-        state_handler.restore_state(model, state)
+        state_handler.restore_state(model, state, load_from_shm=load_from_shm)
+        if isinstance(model, torch.nn.Module):
+            # ``set_model()`` intentionally builds the parameters-only mapping
+            # used by fresh profiling. Restored-state export happens after
+            # ``initialize_inference()`` clears ``self.model``, however, so it
+            # cannot recover resident buffers later via ``prepare_state``.
+            # Preserve their live ids here without changing fresh-profile
+            # filtering semantics.
+            for name, buffer in model.named_buffers():
+                self.tensor_id_to_name_map.setdefault(id(buffer), name)
+
+    def export_state(self) -> TensorManagerState:
+        """Export a deep-isolated snapshot rebuilt from the live block runtime.
+
+        Returns:
+            A state containing current tensor IDs, view IDs, statistic names,
+            and SHM block names.
+
+        Raises:
+            RuntimeError: If no restored state or live allocation-block
+                controller is available.
+        """
+        restored_state = self.tensor_manager_state
+        if restored_state is None:
+            raise RuntimeError("Cannot export TensorManager state: no live restored state is available")
+        if self.loader_type != "allocation_block_transfer" or restored_state.loader_type != self.loader_type:
+            raise RuntimeError("TensorManager state export requires loader_type='allocation_block_transfer'")
+
+        loader = self.tensor_layer_loader
+        controller = getattr(loader, "allocation_controller", None)
+        if not isinstance(controller, AllocationBlockController):
+            raise RuntimeError("TensorManager state export requires a live AllocationBlockController")
+
+        exported = TensorManagerStateHandler(self).prepare_state(
+            loader_type=restored_state.loader_type,
+            allocation_ordered=restored_state.allocation_ordered,
+            label_to_size_map=restored_state.label_to_size_map,
+            block_sizes=restored_state.block_sizes,
+            load_strategy=self.load_strategy,
+            release_strategy=restored_state.release_strategy,
+            label_to_block_id=restored_state.label_to_block_id,
+            stats=self.stats,
+            transfer_to_compute_map=restored_state.transfer_to_compute_map,
+            shm_block_name_map=controller.shm_block_name_map,
+        )
+        return copy.deepcopy(exported)
 
     def plan_state_adoption(
         self,

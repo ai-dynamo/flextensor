@@ -28,7 +28,15 @@ from flextensor.tensor_processors import (
     compute_reachable_tensor_map,
     preprocess_model,
 )
-from flextensor.utils import atomic_write_json, get_tensor_data, set_tensor_data
+from flextensor.utils import (
+    _parse_dense_tensor_layout,
+    _parse_torch_dtype_name,
+    _torch_dtype_name,
+    atomic_write_json,
+    get_tensor_data,
+    is_dense_layout,
+    set_tensor_data,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +93,29 @@ def _rebind_storage_group(tensors: list[torch.Tensor], destination_bytes: torch.
                 f"Storage-group rebind failed ({error}); best-effort source rollback also failed: {rollback_errors}"
             ) from error
         raise
+
+
+def _restore_meta_tensor_metadata(tensor: torch.Tensor, dtype: torch.dtype, stride: tuple[int, ...]) -> None:
+    """Apply the published dtype and stride without replacing the placeholder."""
+    if tensor.layout is not torch.strided:
+        raise ValueError(f"Managed meta tensor must use strided layout, got {tensor.layout}")
+    original = get_tensor_data(tensor)
+    replacement = torch.empty_strided(
+        tuple(original.shape),
+        stride,
+        dtype=dtype,
+        device=original.device,
+    )
+    # Allocation blocks repack every tensor at a fresh aligned byte offset, so
+    # a placeholder's original storage_offset is intentionally not retained.
+    torch._C._set_conj(replacement, original.is_conj())  # noqa: SLF001
+    torch._C._set_neg(replacement, original.is_neg())  # noqa: SLF001
+    with torch.no_grad():
+        set_tensor_data(tensor, replacement)
+        names = getattr(original, "names", None)
+        rename = getattr(tensor, "rename_", None)
+        if names is not None and callable(rename) and any(name is not None for name in names):
+            rename(*names)
 
 
 @dataclass
@@ -155,6 +186,11 @@ class TensorManagerState:
     view_tensors_names: list[str]
     gpu_tensors_names: list[str]
     shm_block_name_map: dict[str, str] | None
+    # Optional additive v3 metadata. Legacy disk profiles omit these fields; an SHM
+    # creator rebuilds them from its live allocation-block views before
+    # publishing state to followers.
+    managed_tensor_dtypes: dict[str, str] = field(default_factory=dict)
+    managed_tensor_layouts: dict[str, dict[str, list[int]]] = field(default_factory=dict)
 
     def validate_internal(self) -> None:  # noqa: C901
         """Validate consistency that does not depend on a live model or runtime."""
@@ -203,6 +239,41 @@ class TensorManagerState:
 
         managed_names = {stat.name for stats in self.load_strategy.values() for stat in stats}
         managed_names.update(self.view_tensors_names)
+        if not isinstance(self.managed_tensor_dtypes, dict):
+            raise mismatch("managed_tensor_dtypes must be a dictionary")
+        dtype_names = set(self.managed_tensor_dtypes)
+        invalid_dtype_names = sorted(dtype_names - saved_names)
+        if invalid_dtype_names:
+            raise mismatch(f"managed_tensor_dtypes references names outside saved inventory: {invalid_dtype_names}")
+        if dtype_names and dtype_names != managed_names:
+            raise mismatch(
+                "managed_tensor_dtypes must be empty for a legacy profile or cover every managed tensor: "
+                f"missing={sorted(managed_names - dtype_names)}, unexpected={sorted(dtype_names - managed_names)}"
+            )
+        for name, dtype_name in self.managed_tensor_dtypes.items():
+            try:
+                dtype = _parse_torch_dtype_name(dtype_name)
+                if _torch_dtype_name(dtype) != dtype_name:
+                    raise ValueError(f"managed tensor dtype must use its canonical name, got {dtype_name!r}")
+            except ValueError as error:
+                raise mismatch(f"invalid dtype metadata for {name!r}: {error}") from error
+        if not isinstance(self.managed_tensor_layouts, dict):
+            raise mismatch("managed_tensor_layouts must be a dictionary")
+        layout_names = set(self.managed_tensor_layouts)
+        if layout_names and layout_names != managed_names:
+            raise mismatch(
+                "managed_tensor_layouts must be empty for a legacy profile or cover every managed tensor: "
+                f"missing={sorted(managed_names - layout_names)}, unexpected={sorted(layout_names - managed_names)}"
+            )
+        for name, layout in self.managed_tensor_layouts.items():
+            if not isinstance(layout, dict) or set(layout) != {"shape", "stride"}:
+                raise mismatch(f"invalid layout metadata for {name!r}: expected shape and stride")
+            try:
+                shape, stride = _parse_dense_tensor_layout(layout["shape"], layout["stride"])
+                # Retain PyTorch's size/stride representation checks without allocating storage.
+                torch.empty_strided(shape, stride, device="meta")
+            except (ValueError, RuntimeError, TypeError, OverflowError) as error:
+                raise mismatch(f"invalid layout metadata for {name!r}: {error}") from error
         final_gpu_names = saved_names - managed_names
         explicit_gpu_names = set(self.gpu_tensors_names)
         if explicit_gpu_names != final_gpu_names:
@@ -320,6 +391,8 @@ class TensorManagerState:
             "view_tensors_names": self.view_tensors_names,
             "gpu_tensors_names": self.gpu_tensors_names,
             "shm_block_name_map": self.shm_block_name_map,
+            "managed_tensor_dtypes": self.managed_tensor_dtypes,
+            "managed_tensor_layouts": self.managed_tensor_layouts,
         }
 
     @staticmethod
@@ -379,6 +452,8 @@ class TensorManagerState:
             view_tensors_names=data["view_tensors_names"],
             gpu_tensors_names=data["gpu_tensors_names"],
             shm_block_name_map=data["shm_block_name_map"],
+            managed_tensor_dtypes=data.get("managed_tensor_dtypes", {}),
+            managed_tensor_layouts=data.get("managed_tensor_layouts", {}),
         )
         state.validate_internal()
         return state
@@ -470,10 +545,18 @@ class TensorManagerStateHandler:
 
         view_tensors_ids = []
         view_tensors_names = []
-        for tensor_id, _view in tensor_id_to_view_map.items():
+        managed_tensor_dtypes = {}
+        managed_tensor_layouts = {}
+        for tensor_id, view in tensor_id_to_view_map.items():
             view_tensors_ids.append(tensor_id)
             tensor_name = tensor_id_to_name_map[tensor_id]
             view_tensors_names.append(tensor_name)
+            if not isinstance(view, torch.Tensor):
+                raise TypeError(
+                    f"Managed tensor view for {tensor_name!r} must be a torch.Tensor, got {type(view).__name__}"
+                )
+            managed_tensor_dtypes[tensor_name] = _torch_dtype_name(view.dtype)
+            managed_tensor_layouts[tensor_name] = {"shape": list(view.shape), "stride": list(view.stride())}
 
         # add tensor names
         updated_load_strategy = {}
@@ -525,7 +608,7 @@ class TensorManagerStateHandler:
             for stat in s_stats:
                 strategy_tensors_names.add(stat.name)
         offload_tensors_names = strategy_tensors_names.union(view_tensors_names)
-        gpu_tensors_names = list(set(tensor_id_to_name_map.values()).difference(offload_tensors_names))
+        gpu_tensors_names = sorted(set(tensor_id_to_name_map.values()).difference(offload_tensors_names))
 
         tensor_manager_state = TensorManagerState(
             loader_type=loader_type,
@@ -542,6 +625,8 @@ class TensorManagerStateHandler:
             view_tensors_names=view_tensors_names,
             gpu_tensors_names=gpu_tensors_names,
             shm_block_name_map=shm_block_name_map,
+            managed_tensor_dtypes=managed_tensor_dtypes,
+            managed_tensor_layouts=managed_tensor_layouts,
         )
         return tensor_manager_state
 
@@ -991,6 +1076,7 @@ class TensorManagerStateHandler:
         *,
         strict: bool = True,
         preprocess_model_state: bool = True,
+        load_from_shm: bool = False,
     ) -> StateValidationResult:
         """
         Restore a TensorManager state from a TensorManagerState object.
@@ -1007,6 +1093,9 @@ class TensorManagerStateHandler:
             preprocess_model_state: If True (default), establish ordinary
                 profile-load placement before rebinding. Disable only after an
                 adoption plan has already established final placement.
+            load_from_shm: Whether this process is a follower attaching to blocks
+                named by the saved state. The default is the creator/disk-restore
+                role, which always discards saved block names.
 
         Raises:
             ValueError: If strict=True and the saved state contains tensor names
@@ -1021,6 +1110,24 @@ class TensorManagerStateHandler:
         """
         tm = self.tensor_manager
 
+        # Never mutate a profile supplied by the caller. Creator restoration in
+        # particular rewrites the copied SHM map below.
+        state = copy.deepcopy(state)
+
+        manager_uses_shm = getattr(tm, "use_shm", False) is True
+        if load_from_shm and not manager_uses_shm:
+            raise ValueError("load_from_shm=True requires TensorManager(use_shm=True)")
+        if load_from_shm and not preprocess_model_state:
+            raise ValueError("load_from_shm=True is incompatible with preprocess_model_state=False")
+
+        if manager_uses_shm and (
+            state.loader_type != "allocation_block_transfer" or tm.loader_type != "allocation_block_transfer"
+        ):
+            raise ValueError(
+                "SHM state restoration requires loader_type='allocation_block_transfer'; "
+                f"got saved loader_type={state.loader_type!r} and configured loader_type={tm.loader_type!r}"
+            )
+
         # Validate loader_type compatibility early to fail fast with a clear error
         state_loader_type = state.loader_type
         if state_loader_type != tm.loader_type:
@@ -1034,27 +1141,62 @@ class TensorManagerStateHandler:
 
         state.validate_internal()
         load_labels = {label for label, stats in state.load_strategy.items() if stats}
-        if (
-            state.loader_type != "strategy"
-            and tm.use_shm
-            and state.shm_block_name_map is not None
-            and set(state.shm_block_name_map) != load_labels
-        ):
-            raise ValueError(
-                "Saved state mismatch: shm_block_name_map must cover exactly the nonempty load labels. "
-                "Re-profile the model."
-            )
+        if manager_uses_shm:
+            if not load_from_shm:
+                # Creators publish fresh blocks in the current namespace.
+                state.shm_block_name_map = None
+            elif state.shm_block_name_map is None:
+                raise ValueError("load_from_shm=True requires shm_block_name_map covering every nonempty load label")
+            else:
+                if set(state.shm_block_name_map) != load_labels:
+                    raise ValueError(
+                        "Saved state mismatch: shm_block_name_map must cover exactly the nonempty load labels. "
+                        "Re-profile the model."
+                    )
+                blank_name_labels = sorted(
+                    label
+                    for label, block_name in state.shm_block_name_map.items()
+                    if not isinstance(block_name, str) or not block_name.strip()
+                )
+                if blank_name_labels:
+                    raise ValueError(
+                        "shm_block_name_map contains blank block names for allocation labels: "
+                        + ", ".join(blank_name_labels)
+                    )
+                inconsistent_prefix_groups = {
+                    block_id: {label: state.shm_block_name_map[label] for label in labels}
+                    for block_id, labels in state.allocation_ordered.items()
+                    if len({state.shm_block_name_map[label] for label in labels}) > 1
+                }
+                if inconsistent_prefix_groups:
+                    raise ValueError(
+                        "shm_block_name_map must use one shared prefix for every allocation group; "
+                        f"inconsistent groups: {inconsistent_prefix_groups}"
+                    )
 
         validation_result = self.validate_state_compatibility(model, state)
         self._check_validation_result(validation_result, strict=strict)
+        current = None
         if isinstance(model, torch.nn.Module):
             live_tensors: dict[str, torch.Tensor] = dict(model.named_parameters(remove_duplicate=False))
             live_tensors.update(model.named_buffers(remove_duplicate=False))
             buffer_names = {name for name, _ in model.named_buffers(remove_duplicate=False)}
-            current = capture_model_state(model)
-            tensors_by_storage: dict[object, dict[object, list[str]]] = {storage.id: {} for storage in current.storages}
-            for captured_tensor in current.tensors:
-                tensors_by_storage[captured_tensor.storage_id][captured_tensor.id] = list(captured_tensor.names)
+            if load_from_shm:
+                # Managed follower parameters intentionally remain on meta until
+                # AllocationBlockController attaches the published CPU blocks.
+                # capture_model_state() rejects meta tensors, and ordinary state
+                # adoption is neither needed nor valid for this role.
+                tensors_by_storage: dict[object, dict[object, list[str]]] = {}
+                for name, live_tensor in live_tensors.items():
+                    if not live_tensor.is_meta:
+                        tensors_by_storage.setdefault(live_tensor.untyped_storage()._cdata, {}).setdefault(  # noqa: SLF001
+                            id(live_tensor), []
+                        ).append(name)
+            else:
+                current = capture_model_state(model)
+                tensors_by_storage = {storage.id: {} for storage in current.storages}
+                for captured_tensor in current.tensors:
+                    tensors_by_storage[captured_tensor.storage_id][captured_tensor.id] = list(captured_tensor.names)
         else:
             live_tensors = model
             buffer_names = set()
@@ -1069,6 +1211,50 @@ class TensorManagerStateHandler:
         managed_buffers = sorted(managed_names & buffer_names)
         if managed_buffers:
             raise ValueError(f"Registered buffer(s) must remain final-GPU, not managed: {managed_buffers}")
+        if load_from_shm and managed_names and not state.managed_tensor_dtypes:
+            raise ValueError("SHM follower state requires dtype metadata for every managed tensor")
+        if load_from_shm and managed_names and not state.managed_tensor_layouts:
+            raise ValueError("SHM follower state requires layout metadata for every managed tensor")
+        pending_meta_updates: dict[int, tuple[torch.Tensor, torch.dtype, tuple[int, ...]]] = {}
+        effective_dtypes: dict[str, torch.dtype] = {}
+        for name, dtype_name in state.managed_tensor_dtypes.items():
+            matching_tensor = live_tensors.get(name)
+            if matching_tensor is None:
+                continue
+            saved_dtype = _parse_torch_dtype_name(dtype_name)
+            effective_dtypes[name] = saved_dtype
+            if load_from_shm:
+                layout = state.managed_tensor_layouts[name]
+                if list(matching_tensor.shape) != layout["shape"]:
+                    raise ValueError(
+                        f"Managed tensor shape drift for {name}: "
+                        f"saved={layout['shape']}, current={list(matching_tensor.shape)}"
+                    )
+                if matching_tensor.layout is not torch.strided:
+                    raise ValueError(f"Managed tensor {name!r} must use strided layout, got {matching_tensor.layout}")
+                saved_stride = tuple(layout["stride"])
+                if matching_tensor.is_meta:
+                    previous = pending_meta_updates.setdefault(
+                        id(matching_tensor), (matching_tensor, saved_dtype, saved_stride)
+                    )
+                    if previous[1:] != (saved_dtype, saved_stride):
+                        raise ValueError(
+                            f"Managed tensor aliases request conflicting dtype or stride metadata for {name}"
+                        )
+                    continue
+                current_stride = (
+                    matching_tensor.stride()
+                    if is_dense_layout(matching_tensor)
+                    else torch.empty(matching_tensor.shape, device="meta").stride()
+                )
+                if current_stride != saved_stride:
+                    raise ValueError(
+                        f"Managed tensor stride drift for {name}: saved={saved_stride}, current_packed={current_stride}"
+                    )
+            if matching_tensor.dtype != saved_dtype:
+                raise ValueError(
+                    f"Managed tensor dtype drift for {name}: saved={saved_dtype}, current={matching_tensor.dtype}"
+                )
         contradictory_storages = {
             storage_id: sorted(name for names in tensors.values() for name in names)
             for storage_id, tensors in tensors_by_storage.items()
@@ -1092,18 +1278,22 @@ class TensorManagerStateHandler:
         for stat in statistics:
             matching_tensor = live_tensors.get(stat.name)
             if matching_tensor is not None:
-                logical_bytes = matching_tensor.numel() * matching_tensor.element_size()
+                effective_dtype = effective_dtypes.get(stat.name, matching_tensor.dtype)
+                effective_element_size = torch.empty((), dtype=effective_dtype).element_size()
+                logical_bytes = matching_tensor.numel() * effective_element_size
                 if stat.size_bytes != logical_bytes:
                     raise ValueError(
                         f"TensorStatistics.size_bytes drift for {stat.name}: "
                         f"saved={stat.size_bytes}, current_logical={logical_bytes}"
                     )
+        for matching_tensor, saved_dtype, saved_stride in pending_meta_updates.values():
+            if matching_tensor.dtype != saved_dtype or matching_tensor.stride() != saved_stride:
+                _restore_meta_tensor_metadata(matching_tensor, saved_dtype, saved_stride)
 
         if not preprocess_model_state and isinstance(model, torch.nn.Module):
+            if current is None:
+                raise RuntimeError("State-adoption validation requires a captured live model state")
             self._validate_adopted_placement(current, state, live_tensors)
-
-        # Deep-copy the state so we don't mutate the caller's object (it may be reused).
-        state = copy.deepcopy(state)
 
         # Put model in the same state as the discovery path: disable grad, params/buffers on GPU,
         # pinned memory for strategy loader, and traced_tensors populated for inference traps.
@@ -1189,6 +1379,16 @@ class TensorManagerStateHandler:
         valid_view_tensors = [name for name in state.view_tensors_names if name in valid_tensor_names]
         state.view_tensors_names = valid_view_tensors
         state.view_tensors_ids = [tensor_name_to_id_map[name] for name in valid_view_tensors]
+        state.managed_tensor_dtypes = {
+            name: state.managed_tensor_dtypes[name]
+            for name in valid_view_tensors
+            if name in state.managed_tensor_dtypes
+        }
+        state.managed_tensor_layouts = {
+            name: state.managed_tensor_layouts[name]
+            for name in valid_view_tensors
+            if name in state.managed_tensor_layouts
+        }
 
         for name in state.view_tensors_names:
             offload_keys.add(name)
@@ -1214,6 +1414,7 @@ class TensorManagerStateHandler:
         # state and must not be mistaken for a restored profile.
         tm._state_restored_from_profile = True  # noqa: SLF001
         tm.set_model(model)
+        tm.load_from_shm = load_from_shm
 
         return validation_result
 

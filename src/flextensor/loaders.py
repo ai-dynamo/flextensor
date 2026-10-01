@@ -25,6 +25,7 @@ from flextensor.host_pinning import HostPinner
 from flextensor.instrumentation import instrumentable
 from flextensor.offload_timing import OffloadTimingCollector
 from flextensor.piecewise_prefetch_policy import PiecewisePrefetchPolicy
+from flextensor.shm.flexible_shm import FlexibleSharedMemory
 from flextensor.strategy_operations import find_transfers_for_preload
 
 from .collectors import IterativeLayerStatistics, LayerStatistics, TensorStatistics
@@ -1103,6 +1104,8 @@ class AllocationBlockController:
         shm_block_name_map: dict[str, str] | None = None,
         block_name_fn: Callable[[int], str] | None = None,
         *,
+        load_from_shm: bool = False,
+        shm_owner: FlexibleSharedMemory | None = None,
         host_pinner: HostPinner,
         release_tensor_memory: bool = True,
     ) -> None:
@@ -1117,11 +1120,11 @@ class AllocationBlockController:
         self.gpu_block_view_map = {}
         self.tensor_id_to_view_map: dict[int, torch.Tensor] = {}
         self.use_shm = use_shm
-        self.load_model_from_shm = use_shm and shm_block_name_map is not None
+        attach_existing = use_shm and load_from_shm
         # Treat the caller's profile map as input. Publishing names into it
         # incrementally would leave a failed construction looking complete to
         # a later retry.
-        self.shm_block_name_map = dict(shm_block_name_map or {})
+        self.shm_block_name_map = dict(shm_block_name_map or {}) if attach_existing else {}
         self._block_name_fn = block_name_fn or (lambda index: f"ft_{os.getpid()}_{index}")
         self.host_pinner = host_pinner
         # When True (inference default), source weights are released as they are
@@ -1133,34 +1136,30 @@ class AllocationBlockController:
         self._construction_rollback = ConstructionRollback()
 
         try:
-            if release_tensor_memory and not self.load_model_from_shm:
+            if release_tensor_memory and not attach_existing:
                 self._validate_source_storage(allocation_ordered, strategy_map, tensors_map)
             for index, (_block_id, layers) in enumerate(allocation_ordered.items()):
-                shm_prefix = None
-                if self.use_shm:
-                    if layers[0] not in self.shm_block_name_map:
-                        shm_prefix = self._block_name_fn(index)
-                    else:
-                        shm_prefix = self.shm_block_name_map[layers[0]]
+                shm_prefix = self._get_shm_prefix(index, layers)
                 allocation_manager = AllocationManager(
                     shm_block_name_prefix=shm_prefix,
-                    load_from_shm=self.load_model_from_shm,
+                    load_from_shm=attach_existing,
+                    shm_owner=shm_owner,
                     pinned_memory=True,
                     host_pinner=self.host_pinner,
                     release_tensor_memory=self.release_tensor_memory,
                 )
                 for label in layers:
-                    if self.use_shm and label not in self.shm_block_name_map:
-                        self.shm_block_name_map[label] = shm_prefix
                     strategy = strategy_map[label]
                     if len(strategy) == 0:
                         continue
+                    if self.use_shm and label not in self.shm_block_name_map:
+                        self.shm_block_name_map[label] = shm_prefix
                     block = allocation_manager.block()
                     # Record ownership before allocation or map publication:
                     # allocate() is where CPU SHM is created/attached and may
                     # fail after acquiring the handle.
                     self._owned_blocks.append(block)
-                    if release_tensor_memory and not self.load_model_from_shm:
+                    if release_tensor_memory and not attach_existing:
                         self._construction_rollback.record(block, strategy, tensors_map)
                     # _add_tensors calls block.allocate(), which may release each
                     # source tensor according to release_tensor_memory.
@@ -1196,6 +1195,14 @@ class AllocationBlockController:
             if self._owned_blocks:
                 self._attach_cleanup_controller(primary_error)
             raise
+
+    def _get_shm_prefix(self, index: int, layers: list[str]) -> str | None:
+        if not self.use_shm:
+            return None
+        for label in layers:
+            if label in self.shm_block_name_map:
+                return self.shm_block_name_map[label]
+        return self._block_name_fn(index)
 
     @staticmethod
     def _validate_source_storage(

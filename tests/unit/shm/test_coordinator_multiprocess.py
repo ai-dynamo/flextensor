@@ -113,7 +113,8 @@ def short_lived_creator_process(
         coord = ShmCoordinator(ns, keep_alive_seconds=keep_alive_seconds)
         coord.notify_ready()
         ready_event.set()
-        if not close_event.wait(timeout=EVENT_TIMEOUT):
+        # Allow two sequential follower startups plus scheduling headroom.
+        if not close_event.wait(timeout=EVENT_TIMEOUT * 3):
             raise TimeoutError("Timed out waiting for parent to release short-lived creator")
         rq.put({"success": True, "role": "creator"})
     except (FileNotFoundError, FileExistsError, OSError) as e:
@@ -159,7 +160,8 @@ def live_follower_process(
         coord = ShmCoordinator(ns, keep_alive_seconds=keep_alive_seconds)
         coord.wait_for_ready()
         connected_event.set()
-        if not close_event.wait(timeout=EVENT_TIMEOUT):
+        # Allow checker startup and both creator/checker joins, plus scheduling headroom.
+        if not close_event.wait(timeout=EVENT_TIMEOUT * 4):
             raise TimeoutError("Timed out waiting for parent to release live follower")
         coord.close()
         rq.put({"success": True, "role": "live_follower"})

@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast, runtime_checkable
 
 if TYPE_CHECKING:
     from flextensor.collectors import LayerStatistics
@@ -41,7 +41,8 @@ from flextensor.offload_timing import (
     OffloadTimingReport,
     format_offload_timing_table,
 )
-from flextensor.state_handler import TensorManagerState  # noqa: TC001 — beartype resolves annotations at runtime
+from flextensor.shm.flexible_shm import FlexibleSharedMemory  # noqa: TC001 - runtime beartype annotation
+from flextensor.state_handler import TensorManagerState  # noqa: TC001 - runtime beartype annotation
 from flextensor.tensor_discovery import (
     has_offload_modules,
     has_patched_ancestor,
@@ -241,7 +242,7 @@ class _ShmCoordinatorLike(Protocol):
     namespace: str
     is_creator: bool
 
-    def wait_for_ready(self) -> None: ...
+    def wait_for_ready(self, timeout: float | None = None) -> None: ...
     def read_profile(self) -> TensorManagerState: ...
 
 
@@ -249,7 +250,10 @@ class _ShmCoordinatorLike(Protocol):
 class TensorManagerProtocol(Protocol):
     """Structural interface for tensor managers used by ``OffloadManager``."""
 
+    use_shm: bool
+    load_from_shm: bool
     shm_namespace: str | None
+    shm_owner: FlexibleSharedMemory | None
     stats: list[LayerStatistics]
 
     @property
@@ -260,12 +264,19 @@ class TensorManagerProtocol(Protocol):
     def initialize_warmup(self) -> nn.Module: ...
     def initialize_profile(self) -> nn.Module: ...
     def initialize_inference(self) -> nn.Module: ...
-    def restore_state(self, model: nn.Module, state: TensorManagerState) -> None: ...
+    def restore_state(
+        self,
+        model: nn.Module,
+        state: TensorManagerState,
+        *,
+        load_from_shm: bool = False,
+    ) -> None: ...
     def plan_state_adoption(self, model: nn.Module, state: TensorManagerState) -> StateTransitionPlan: ...
     def execute_state_adoption(self, model: nn.Module, plan: StateTransitionPlan) -> None: ...
     def restore_adopted_state(self, model: nn.Module, state: TensorManagerState) -> None: ...
     def prepare_infer_load_mode(self) -> None: ...
     def prepare_final_model(self, model: nn.Module, *, in_place: bool = False) -> nn.Module: ...
+    def export_state(self) -> TensorManagerState: ...
     def save_profile(self, profile_directory: str) -> None: ...
     def load_profile(self, profile_directory: str, model: nn.Module) -> None: ...
     def get_gpu_memory_usage(self) -> GPUMemoryUsage: ...
@@ -467,6 +478,12 @@ class OffloadManager:
         # Keep post-migration data alive when failed takeover cleanup cannot rebind its parameters.
         self._failed_state_takeover_parameter_data: list[tuple[nn.Parameter, torch.Tensor]] = []
 
+        # Restores are serialized, so retain at most one failed candidate for cleanup retry.
+        self._failed_restored_tensor_manager: Any | None = None
+
+        # SharedOffloadSession keeps this reservation until cleanup ends.
+        self._shared_offload_owner_token: object | None = None
+
     @property
     def compiled_offload_manager_id(self) -> int:
         """Stable id wired into compiled-offload custom ops for this manager."""
@@ -503,6 +520,7 @@ class OffloadManager:
             UserWarning: If any other one-shot field differs from the value
                 the active ``TensorManager`` captured.
         """
+        self._check_shared_offload_reservation()
         if self._tensor_manager is not None:
             captured = self._tensor_manager_oneshot_snapshot
             old_skip = captured.get("skip_discovery", getattr(self.config, "skip_discovery", None))
@@ -524,6 +542,62 @@ class OffloadManager:
         # Enable/disable instrumentation based on config
         registry = get_registry()
         registry.enabled = config.enable_instrumentation
+
+    def _check_shared_offload_reservation(self, owner_token: object | None = None) -> None:
+        """Reject access that does not own an active shared session."""
+        reservation = self._shared_offload_owner_token
+        if reservation is not None and reservation is not owner_token:
+            raise RuntimeError(
+                "OffloadManager is reserved by an active SharedOffloadSession; "
+                "close that session before reusing or releasing this manager."
+            )
+
+    def _prepare_shared_offload(self, config: OffloadConfig, *, owner_token: object) -> None:
+        """Validate an idle manager and install a shared-session config.
+
+        This check runs before role election and, consequently, before either
+        application model factory.  It prevents an expensive creator factory
+        from running only to discover that the named manager is already active.
+        """
+        if self._cleanup_blocked:
+            raise RuntimeError("Manager cleanup is incomplete; retained resources cannot be reused safely.")
+        self._check_shared_offload_reservation()
+        if self._failed_restored_tensor_manager is not None:
+            raise RuntimeError(
+                "Cannot initialize shared offload while candidate cleanup is pending; "
+                "call release() to retry cleanup first."
+            )
+        if self._tensor_manager is not None:
+            raise RuntimeError("Cannot initialize shared offload with an existing TensorManager; call release() first.")
+        if (
+            self._model is not None
+            or self._model_proxy is not None
+            or self._current_phase is not OffloadPhase.NOT_INITIALIZED
+            or self._state_hook_handle is not None
+            or self._patched_modules
+        ):
+            raise RuntimeError(
+                "Cannot initialize shared offload while an active offload runtime exists; call release() first."
+            )
+        self._validate_shm_config(config)
+        self.set_config(config)
+        self._require_shm_allocation_mode()
+        self._shared_offload_owner_token = owner_token
+
+    def _release_shared_offload(
+        self,
+        *,
+        owner_token: object,
+        preserve_model: bool,
+    ) -> None:
+        """Release an owned reservation, raising on absent or mismatched ownership."""
+        if self._shared_offload_owner_token is None or self._shared_offload_owner_token is not owner_token:
+            raise RuntimeError("Shared offload session no longer owns its manager reservation")
+        self.release(
+            preserve_model=preserve_model,
+            _shared_offload_owner_token=owner_token,
+        )
+        self._shared_offload_owner_token = None
 
     def _warn_on_one_shot_field_changes(self, config: OffloadConfig) -> None:
         """Warn for one-shot fields that differ from the live manager's captured values.
@@ -732,6 +806,7 @@ class OffloadManager:
             FileNotFoundError: If profile directory or file doesn't exist.
             ValueError: If no directory is provided and config.profile_storage_dir is not set.
         """
+        self._check_shared_offload_reservation()
         if self._tensor_manager is None:
             self._initialize_tensor_manager()
         # Keep a stable local so mypy can narrow the optional attribute after the guard.
@@ -744,6 +819,29 @@ class OffloadManager:
         if tensor_manager is None:
             raise RuntimeError("Tensor manager initialization failed")
         tensor_manager.load_profile(resolved_dir, target_model)
+
+    def _require_shm_allocation_mode(self) -> None:
+        """Require the only loader mode that supports shared restored blocks."""
+        self._validate_shm_config(self.config)
+        if not self.config.shm_enabled or self.config.transfer_mode != "allocation_block_transfer":
+            raise ValueError(
+                "SHM restored-state initialization requires shm_enabled=True and "
+                "transfer_mode='allocation_block_transfer'"
+            )
+
+    def _validate_restored_shm_namespace(self, namespace: str) -> None:
+        """Ensure restored blocks use the configured stable namespace."""
+        self._require_shm_allocation_mode()
+        if namespace != self.config.shm_namespace:
+            raise ValueError(
+                f"SHM namespace {namespace!r} does not match configured stable namespace {self.config.shm_namespace!r}"
+            )
+
+    def _export_runtime_state(self) -> TensorManagerState:
+        """Export the current live state from the TensorManager runtime."""
+        if self._tensor_manager is None:
+            raise RuntimeError("Cannot export runtime state before TensorManager initialization")
+        return self._tensor_manager.export_state()
 
     def benchmark_transfers(self):
         """Benchmark weight transfer speeds."""
@@ -905,6 +1003,8 @@ class OffloadManager:
         # Import here to avoid circular dependency between offload_manager and tensor_manager modules
         from flextensor.tensor_manager import TensorManager
 
+        self._validate_shm_config(self.config)
+
         device_gpu = torch.device(f"cuda:{self.config.gpu_device}")
 
         tensor_manager_load_strategy = resolve_load_strategy(self.config)
@@ -940,6 +1040,8 @@ class OffloadManager:
         self._tensor_manager_oneshot_snapshot = {
             name: getattr(self.config, name, None) for name in (*_TENSOR_MANAGER_ONESHOT_FIELDS, "skip_discovery")
         }
+        self._tensor_manager.use_shm = self.config.shm_enabled
+        self._tensor_manager.shm_namespace = self.config.shm_namespace
 
     def _transfer_hooks(self, old_model: nn.Module | None, new_model: nn.Module):  # noqa: C901
         """Transfer hooks from old model to new model, preserving module hierarchy.
@@ -1762,9 +1864,47 @@ class OffloadManager:
         profile_component = self.eager_profiling_iters
         return discovery_component + profile_component + self._compiled.extra_iters_before_inference()
 
-    def init(self, config: OffloadConfig | None = None) -> None:
+    @staticmethod
+    def _validate_shm_config(config: OffloadConfig) -> None:
+        """Validate high-level SHM settings before creating or reusing a manager."""
+        if config.shm_enabled and (config.shm_namespace is None or not config.shm_namespace.strip()):
+            raise ValueError("OffloadConfig.shm_namespace must be non-empty when shm_enabled=True")
+
+    def _validate_existing_tensor_manager_config(self, config: OffloadConfig) -> None:
+        """Reject SHM settings that conflict with the live TensorManager."""
+        if self._tensor_manager is None:
+            return
+
+        # Protocol doubles and older managers may not expose a concrete boolean;
+        # only an explicit True means the live manager owns SHM resources.
+        manager_uses_shm = getattr(self._tensor_manager, "use_shm", False) is True
+        if manager_uses_shm != config.shm_enabled:
+            raise RuntimeError(
+                "OffloadConfig.shm_enabled cannot be changed for an existing TensorManager; "
+                "call release() before reinitializing"
+            )
+        if manager_uses_shm and self._tensor_manager.shm_namespace != config.shm_namespace:
+            raise RuntimeError(
+                "OffloadConfig.shm_namespace cannot be changed for an existing TensorManager; "
+                "call release() before reinitializing"
+            )
+
+    def init(
+        self,
+        config: OffloadConfig | None = None,
+        *,
+        _shared_offload_owner_token: object | None = None,
+    ) -> None:
+        self._check_shared_offload_reservation(_shared_offload_owner_token)
         if self._cleanup_blocked:
             raise RuntimeError("Manager cleanup is incomplete; retained resources cannot be reused safely.")
+        if self._failed_restored_tensor_manager is not None:
+            raise RuntimeError(
+                "Cannot initialize while candidate cleanup is pending; call release() to retry shutdown first."
+            )
+        next_config = self.config if config is None else config
+        self._validate_shm_config(next_config)
+        self._validate_existing_tensor_manager_config(next_config)
         if config is not None:
             self.set_config(config)
         if self._tensor_manager is None:
@@ -1797,6 +1937,7 @@ class OffloadManager:
         FlexTensor modifications where possible, but does not roll back storage
         placement. The input model is not guaranteed usable and must be discarded.
         """
+        self._check_shared_offload_reservation()
         if self._cleanup_blocked:
             raise RuntimeError("Manager cleanup is incomplete; retained resources cannot be reused safely.")
         if self._state_takeover_active or self._current_phase != OffloadPhase.NOT_INITIALIZED:
@@ -2009,6 +2150,8 @@ class OffloadManager:
             ``om.iters_before_inference`` eager forwards, ``torch.compile`` each
             offloaded unit, then :meth:`request_strategy_replan`.
         """
+        self._check_shared_offload_reservation()
+
         # Reject an already-compiled model up front, before any state mutation.
         # ``torch.compile`` (and backends built on it, e.g. ``torch_tensorrt``)
         # wrap the model in an ``OptimizedModule`` whose self-referential
@@ -2154,6 +2297,204 @@ class OffloadManager:
             )
         return self._tensor_manager.trap(name)
 
+    @staticmethod
+    def _validate_restored_model_has_no_meta_tensors(model: nn.Module) -> None:
+        """Fail if restored parameters or buffers still lack backing storage."""
+        meta_parameters = sorted(
+            name for name, parameter in model.named_parameters(remove_duplicate=False) if parameter.is_meta
+        )
+        meta_buffers = sorted(name for name, buffer in model.named_buffers(remove_duplicate=False) if buffer.is_meta)
+        if not meta_parameters and not meta_buffers:
+            return
+
+        details = []
+        if meta_parameters:
+            details.append(f"parameters={meta_parameters}")
+        if meta_buffers:
+            details.append(f"buffers={meta_buffers}")
+        raise RuntimeError("Restored model still contains meta tensors: " + "; ".join(details))
+
+    @staticmethod
+    def _cleanup_failed_restored_tensor_manager(
+        tensor_manager: Any,
+    ) -> bool:
+        """Best-effort cleanup that never masks the restoration failure.
+
+        Restored-state initialization documents the candidate model as
+        unusable after failure. Discard its loader-backed tensor data during
+        shutdown so rollback never allocates private copies of SHM weights.
+        """
+        try:
+            tensor_manager.shutdown(preserve_model=False)
+        except BaseException:
+            LOGGER.exception(
+                "OffloadManager: candidate TensorManager.shutdown() failed during restored-state rollback; "
+                "preserving the original initialization error."
+            )
+            return False
+        return True
+
+    def _retry_failed_restored_tensor_manager_cleanup(self) -> None:
+        """Retry shutdown without dropping a candidate that still fails."""
+        tensor_manager = self._failed_restored_tensor_manager
+        if tensor_manager is not None and self._cleanup_failed_restored_tensor_manager(tensor_manager):
+            self._failed_restored_tensor_manager = None
+
+    def _rollback_restored_model_patches(self) -> None:
+        """Remove patches installed by the failed restored-state attempt."""
+        for module in reversed(self._patched_modules):
+            try:
+                self._restore_module_forward(module)
+            except BaseException:
+                LOGGER.exception(
+                    "OffloadManager: failed to remove a partial restored-model patch; "
+                    "preserving the original initialization error."
+                )
+        self._patched_modules.clear()
+
+    def _rollback_restored_state_hook(
+        self,
+        final_model: nn.Module | None,
+        saved_hook_ids: dict[int, set[int]],
+    ) -> None:
+        """Remove a state hook installed before a failed restored-state commit."""
+        if self._state_hook_handle is not None:
+            try:
+                self._state_hook_handle.remove()
+            except BaseException:
+                LOGGER.exception(
+                    "OffloadManager: failed to remove the candidate state hook; "
+                    "preserving the original initialization error."
+                )
+
+        # A failing swap may reset ``_state_hook_handle`` before its newly
+        # registered hook is removed. Remove only FlexTensor-tagged hooks from
+        # the uncommitted model so no orphan callback retains this manager.
+        if final_model is not None:
+            for module in final_model.modules():
+                hooks = module.__dict__.get("_forward_hooks")
+                if hooks is None:
+                    continue
+                preserved_hook_ids = saved_hook_ids.get(id(module), set())
+                for hook_id, hook in list(hooks.items()):
+                    if hook_id not in preserved_hook_ids and getattr(hook, "_ft_state_update_hook", False):
+                        hooks.pop(hook_id, None)
+
+        self._state_hook_handle = None
+
+    def _restore_shared_offload(
+        self,
+        model: nn.Module,
+        state: TensorManagerState,
+        namespace: str,
+        *,
+        load_from_shm: bool,
+        shm_owner: FlexibleSharedMemory | None = None,
+        owner_token: object | None = None,
+        compile_fn: Callable[[nn.Module], nn.Module] | None = None,
+        before_compile: Callable[[], None] | None = None,
+    ) -> OffloadModelProxy:
+        """Initialize either SHM restore role through one transactional path."""
+        self._check_shared_offload_reservation(owner_token)
+        self._validate_restored_shm_namespace(namespace)
+        if self._failed_restored_tensor_manager is not None:
+            raise RuntimeError(
+                "Cannot initialize restored SHM state while candidate cleanup is pending; "
+                "call release() to retry cleanup before restoring another model."
+            )
+        if (
+            self._cleanup_blocked
+            or self._tensor_manager is not None
+            or self._model is not None
+            or self._model_proxy is not None
+            or self._current_phase is not OffloadPhase.NOT_INITIALIZED
+            or self._state_hook_handle is not None
+            or self._patched_modules
+        ):
+            raise RuntimeError(
+                "Cannot initialize restored SHM state while an active offload runtime exists; "
+                "call release() before restoring another model."
+            )
+
+        candidate: TensorManagerProtocol | None = None
+        final_model: nn.Module | None = None
+        saved_final_model_hook_ids: dict[int, set[int]] = {}
+        try:
+            # Match offload()/offload_from_state(): resolve the compile mode
+            # before building a manager so patched forwards use the right path.
+            self._manual_update_state = False
+            self._compiled.resolve_activation(self.config, compile_fn)
+            if (load_from_shm or shm_owner is not None) and self._compiled.replan_active:
+                LOGGER.warning(
+                    "FlexTensor compiled-offload: strategy replan is disabled for coordinated SHM loads. "
+                    "Published blocks must remain available to followers for the shared lifetime; "
+                    "compiled forwards remain enabled."
+                )
+                self._compiled.replan_active = False
+            self.init(_shared_offload_owner_token=owner_token)
+            candidate = cast("TensorManagerProtocol | None", self._tensor_manager)
+            if candidate is None:
+                raise RuntimeError("TensorManager initialization did not produce a manager")
+            self._compiled.arm_non_destructive_first_loader()
+
+            # The allocation-block loader is created by initialize_warmup(), so
+            # install namespace and role before any allocation can occur.
+            candidate.shm_namespace = namespace
+            candidate.shm_owner = shm_owner
+            candidate.restore_state(model, state, load_from_shm=load_from_shm)
+            candidate.initialize_warmup()
+            candidate.initialize_profile()
+            final_model = candidate.initialize_inference()
+            saved_final_model_hook_ids = {
+                id(module): set(module.__dict__.get("_forward_hooks", {})) for module in final_model.modules()
+            }
+            self._validate_restored_model_has_no_meta_tensors(final_model)
+
+            # The saved plan defines the transfer pass boundaries. Expanding
+            # discovery patterns again can add unprofiled units whose transfer
+            # scopes cross into CUDA graph capture before the first saved unit.
+            self._offload_modules(final_model, [stat.label for stat in state.stats])
+            self._exclude_modules(final_model, self.config.exclude_patterns)
+            self._check_no_modules_patched()
+
+            self._model_proxy = OffloadModelProxy(final_model, self)
+            self._swap_to_new_model(final_model, OffloadPhase.INFERENCE)
+            # Publish the original tensor names before compiler wrappers can
+            # rename modules. Keep publication inside the restore transaction.
+            if before_compile is not None:
+                before_compile()
+            self._install_compiled_forwards()
+            self._compiled.on_enter_inference()
+            self._skip_discovery_honored = True
+            self._dump_instrumentation()
+            return self._model_proxy
+        except BaseException:
+            try:
+                self._compiled.teardown()
+            except BaseException:
+                LOGGER.exception(
+                    "OffloadManager: compiled-offload cleanup failed during restored-state rollback; "
+                    "preserving the original initialization error."
+                )
+            self._rollback_restored_model_patches()
+            self._rollback_restored_state_hook(final_model, saved_final_model_hook_ids)
+
+            cleanup_target = candidate if candidate is not None else self._tensor_manager
+            self._tensor_manager = None
+            self._tensor_manager_oneshot_snapshot = {}
+            self._model = None
+            self._model_proxy = None
+            self._current_phase = OffloadPhase.NOT_INITIALIZED
+            self._iteration_count = 0
+            self._initialized = False
+            self._skip_discovery_honored = None
+            self._manual_update_state = False
+            self._cleanup_blocked = False
+
+            if cleanup_target is not None and not self._cleanup_failed_restored_tensor_manager(cleanup_target):
+                self._failed_restored_tensor_manager = cleanup_target
+            raise
+
     @_error_boundary
     def _initialize_from_shm(self, coordinator: _ShmCoordinatorLike, model: nn.Module) -> OffloadModelProxy:
         """Initialize as a follower from shared memory.
@@ -2175,50 +2516,9 @@ class OffloadManager:
         if coordinator.is_creator:
             raise RuntimeError("_initialize_from_shm called on creator coordinator")
 
-        coordinator.wait_for_ready()
+        coordinator.wait_for_ready(timeout=self.config.shm_wait_timeout or None)
         state = coordinator.read_profile()
-
-        # Mirror ``offload()``: resolve compiled-offload flags before TensorManager
-        # creation and patching so followers get compile-transparent forwards.
-        self._compiled.resolve_activation(self.config, None)
-        self._initialize_tensor_manager()
-        # Keep a stable local so mypy can narrow the optional attribute after the guard.
-        tensor_manager = self._tensor_manager
-        if tensor_manager is None:
-            raise RuntimeError("Tensor manager initialization failed")
-        self._compiled.arm_non_destructive_first_loader()
-        tensor_manager.shm_namespace = coordinator.namespace
-        tensor_manager.restore_state(model, state)
-
-        self._model = tensor_manager.initialize_warmup()
-        self._model = tensor_manager.initialize_profile()
-        self._model = tensor_manager.initialize_inference()
-
-        self._offload_modules(self._model, self.config.include_patterns)
-        self._exclude_modules(self._model, self.config.exclude_patterns)
-        self._check_no_modules_patched()
-        # Follower jumps straight to INFERENCE without discovery/profiling
-        # forwards, so mirror the INFERENCE transition compiled-offload wiring.
-        self._install_compiled_forwards()
-        self._compiled.on_enter_inference()
-
-        self._current_phase = OffloadPhase.INFERENCE
-
-        # Wrap in proxy for API consistency with offload() — follower is already
-        # in INFERENCE so update_state() is a no-op on each forward call.
-        if self._model_proxy is None:
-            self._model_proxy = OffloadModelProxy(self._model, self)
-        self._model_proxy.__subject__ = self._model
-
-        # Install the state-update hook for symmetry with ``offload()`` so the
-        # manager invariant "every live manager has a state hook" holds
-        # regardless of entry path.  ``update_state()`` short-circuits in
-        # INFERENCE, so the hook is effectively a no-op for followers — but
-        # ``release()`` can uniformly remove ``self._state_hook_handle``
-        # without needing a path-specific check.
-        self._install_state_update_hook()
-
-        return self._model_proxy
+        return self._restore_shared_offload(model, state, coordinator.namespace, load_from_shm=True)
 
     def clear_profiling_durations(self) -> None:
         """Clear all accumulated duration measurements.
@@ -2319,23 +2619,38 @@ class OffloadManager:
         with self._tensor_manager.pause_profiling():
             yield
 
-    def release(self, *, preserve_model: bool = True) -> None:  # noqa: C901
+    def release(  # noqa: C901 - teardown has independent best-effort cleanup stages.
+        self,
+        *,
+        preserve_model: bool = True,
+        _shared_offload_owner_token: object | None = None,
+    ) -> None:
         """Release this manager and its TensorManager resources.
 
         Args:
             preserve_model: Restore loader-managed tensor values before
                 teardown. Set to ``False`` only when the managed model will
-                be discarded; this avoids copying loader-backed weights
-                and leaves that model unusable.
+                be discarded; this avoids private copies of SHM-backed
+                weights and leaves that model unusable.
         """
-        if self._cleanup_blocked:
+        self._check_shared_offload_reservation(_shared_offload_owner_token)
+        owns_shared_reservation = (
+            _shared_offload_owner_token is not None and self._shared_offload_owner_token is _shared_offload_owner_token
+        )
+        if self._cleanup_blocked and not owns_shared_reservation:
             raise RuntimeError(
                 "Manager cleanup is incomplete; TensorManager resources remain retained and cannot be released safely."
             )
+        if owns_shared_reservation:
+            self._cleanup_blocked = False
         # Undo any compile_fn substitutions and tear down the compiled-offload
         # tail before restoring forwards, so the model is left as it was handed in.
         self._manual_update_state = False
         self._compiled.teardown()
+
+        # Failed SHM restore candidates are not associated with the live model,
+        # so retry their staged cleanup independently before releasing it.
+        self._retry_failed_restored_tensor_manager_cleanup()
 
         if self._tensor_manager is not None:
             teardown_error: Exception | None = None
@@ -2382,6 +2697,8 @@ class OffloadManager:
         if self._state_hook_handle is not None:
             _safe_remove_hook_handle(self._state_hook_handle, context="release()")
             self._state_hook_handle = None
+        if self._failed_restored_tensor_manager is not None:
+            raise RuntimeError("TensorManager cleanup remains pending; call release() again to retry shutdown.")
 
     def _offload_modules(self, model: nn.Module, patterns: list[str]) -> None:
         """Patch modules matching include patterns, skipping those with patched ancestors.
