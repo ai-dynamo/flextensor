@@ -10,6 +10,7 @@ import contextlib
 import logging
 import os
 import struct
+from collections import Counter
 from multiprocessing.resource_tracker import register as resource_tracker_register
 from multiprocessing.resource_tracker import unregister as resource_tracker_unregister
 from multiprocessing.shared_memory import SharedMemory
@@ -21,6 +22,17 @@ from flextensor.shm.sync_primitives import BaseLock, ProcessFileLock, SemaphoreL
 logger = logging.getLogger(__name__)
 
 HEADER_SIZE = 5
+
+
+def _unlink_shared_memory(shm: SharedMemory) -> None:
+    """Unlink an untracked mapping without leaving a stale tracker entry."""
+    tracker_name = shm._name  # noqa: SLF001
+    resource_tracker_register(tracker_name, "shared_memory")
+    try:
+        shm.unlink()
+    except BaseException:
+        resource_tracker_unregister(tracker_name, "shared_memory")
+        raise
 
 
 class SharedMultiString:
@@ -49,9 +61,11 @@ class SharedMultiString:
         """
         # Respect the create parameter
         self.shm: SharedMemory | None = None
+        self._created = False
         if create:
             try:
                 self.shm = SharedMemory(name=name, size=size, create=True)
+                self._created = True
                 # Initialize the header for new shared memory
                 self.shm.buf[0:4] = struct.pack("I", HEADER_SIZE)
                 self.shm.buf[4:5] = struct.pack("?", False)
@@ -64,6 +78,8 @@ class SharedMultiString:
         # Unregister from resource tracker to prevent spurious cleanup warnings in multiprocess scenarios
         # Use _name (with / prefix) to match what resource_tracker registered
         resource_tracker_unregister(self.shm._name, "shared_memory")  # noqa: SLF001
+        self._shm_name = self.shm.name
+        self._name_unlinked = False
 
     def append(self, string: str) -> None:
         """Append a string to the buffer."""
@@ -113,14 +129,30 @@ class SharedMultiString:
             self.shm.close()
             self.shm = None
 
+    def unlink_name(self) -> None:
+        """Remove the global SHM name without closing the local mapping."""
+        if getattr(self, "_name_unlinked", False):
+            return
+        shm = self.shm
+        close_after = False
+        if shm is None:
+            try:
+                shm = SharedMemory(name=self._shm_name, create=False)
+            except FileNotFoundError:
+                self._name_unlinked = True
+                return
+            close_after = True
+        try:
+            with contextlib.suppress(FileNotFoundError):
+                _unlink_shared_memory(shm)
+        finally:
+            if close_after:
+                shm.close()
+        self._name_unlinked = True
+
     def unlink(self) -> None:
         """Unlink and close the shared memory, removing it from the system."""
-        # Register back to resource tracker before unlink, then unlink before close
-        # Use _name (with / prefix) to match what resource_tracker expects
-        if self.shm is not None:
-            resource_tracker_register(self.shm._name, "shared_memory")  # noqa: SLF001
-            with contextlib.suppress(FileNotFoundError):
-                self.shm.unlink()
+        self.unlink_name()
         self.close()
 
 
@@ -141,9 +173,20 @@ class MultiprocessCondition:
             lock_class: Lock class to use (default: ProcessFileLock).
         """
         self.name = name
-        self.notification_list: SharedMultiString | None = SharedMultiString(name=name, create=is_creator)
+        notification_list = SharedMultiString(name=name, create=is_creator)
         self.lock_class = lock_class
-        self.lock: BaseLock | None = self.lock_class(name, locked=False)
+        try:
+            lock = self.lock_class(name, locked=False)
+        except BaseException as error:
+            try:
+                (notification_list.unlink if notification_list._created else notification_list.close)()  # noqa: SLF001
+            except BaseException as cleanup_error:
+                if add_note := getattr(error, "add_note", None):
+                    add_note(f"Failed to roll back condition shared memory: {cleanup_error!r}")
+            raise
+        self.notification_list: SharedMultiString | None = notification_list
+        self.lock: BaseLock | None = lock
+        self._closed_lock: BaseLock | None = None
 
     def wait_for_ready(self) -> None:
         """Block until notify_ready() is called."""
@@ -157,8 +200,9 @@ class MultiprocessCondition:
             if notification_list.is_ready():
                 return
             lock_name = f"{self.name}_{pid}"
-            # Always use SemaphoreLock for notifications, create and lock it
-            notification_lock = SemaphoreLock(lock_name, locked=True, non_blocking=False)
+            # Other local waiters may already have consumed the semaphore token.
+            # Acquire only after releasing the registration lock.
+            notification_lock = SemaphoreLock(lock_name, locked=False)
             notification_list.append(f"{pid}")
 
         try:
@@ -166,13 +210,12 @@ class MultiprocessCondition:
                 notification_lock.acquire(non_blocking=False)
         finally:
             if notification_lock is not None:
-                with contextlib.suppress(FileNotFoundError, AttributeError, OSError):
-                    notification_lock.unlink()
+                # The notifier owns unlinking; other local waiters may still need the name.
                 with contextlib.suppress(FileNotFoundError, AttributeError, OSError):
                     notification_lock.close()
 
     def notify_ready(self) -> None:
-        """Signal all waiting processes that the condition is ready."""
+        """Signal every registered waiter that the condition is ready."""
         lock = self.lock
         notification_list = self.notification_list
         if lock is None or notification_list is None:
@@ -180,27 +223,51 @@ class MultiprocessCondition:
         with lock:
             notification_list.set_ready()
             pids = notification_list.get_list()
-            for waiter_pid in pids:
+            delivery_errors: list[Exception] = []
+            for waiter_pid, waiter_count in Counter(pids).items():
                 if not waiter_pid:
                     continue
                 lock_name = f"{self.name}_{waiter_pid}"
                 try:
-                    # Always use SemaphoreLock for notifications, connect without locking
-                    notification_lock = SemaphoreLock(lock_name, locked=False)
-                    notification_lock.signal()
-                    notification_lock.close()
+                    notification_lock = SemaphoreLock(lock_name, locked=False, create=False)
                 except posix_ipc.ExistentialError:
-                    # Lock doesn't exist - process may not be waiting (expected case)
-                    pass
-                except OSError as e:
-                    # System error (PermissionError, ENOMEM, EMFILE) - log as warning
-                    # If notification delivery fails, the waiter hangs forever
+                    continue
+                except Exception as error:
+                    logger.warning(
+                        "Failed to attach to notification for process %s (lock_name=%s): %s",
+                        waiter_pid,
+                        lock_name,
+                        error,
+                    )
+                    delivery_errors.append(error)
+                    continue
+
+                try:
+                    for _ in range(waiter_count):
+                        notification_lock.signal()
+                    notification_lock.unlink_name()
+                except Exception as error:
                     logger.warning(
                         "Failed to deliver notification to process %s (lock_name=%s): %s",
                         waiter_pid,
                         lock_name,
-                        e,
+                        error,
                     )
+                    delivery_errors.append(error)
+                finally:
+                    try:
+                        notification_lock.close()
+                    except Exception as error:
+                        logger.warning(
+                            "Failed to close notification for process %s (lock_name=%s): %s",
+                            waiter_pid,
+                            lock_name,
+                            error,
+                        )
+                        delivery_errors.append(error)
+
+            if delivery_errors:
+                raise delivery_errors[0]
 
     def close(self) -> None:
         """Close the notification list without unlinking."""
@@ -209,16 +276,26 @@ class MultiprocessCondition:
 
     def unlink(self) -> None:
         """Unlink and close all shared resources."""
+        self.unlink_names()
         if self.notification_list is not None:
-            self.notification_list.unlink()
+            self.notification_list.close()
             self.notification_list = None
         if self.lock is not None:
-            self.lock.unlink()
             self.lock.close()
             self.lock = None
+        self._closed_lock = None
+
+    def unlink_names(self) -> None:
+        """Remove condition data/lock names without closing local handles."""
+        if self.notification_list is not None:
+            self.notification_list.unlink_name()
+        lock = self.lock or getattr(self, "_closed_lock", None)
+        if lock is not None:
+            lock.unlink_name()
 
     def close_lock(self) -> None:
         """Close only the lock resource."""
         if self.lock is not None:
             self.lock.close()
+            self._closed_lock = self.lock
             self.lock = None

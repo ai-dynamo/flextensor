@@ -9,20 +9,12 @@ from pathlib import Path
 import pytest
 import torch
 
-# Check if cupy is available (required for pinned memory)
-try:
-    import cupy  # noqa: F401
-
-    CUPY_AVAILABLE = True
-except ImportError:
-    CUPY_AVAILABLE = False
-
 # Add the project root to the path
 sys.path.insert(0, str(Path(__file__).parent / ".." / ".." / ".."))
 
 # Import the classes directly from the file
 from flextensor.allocation_block import AllocationManager
-from flextensor.host_pinning import HostPinner
+from flextensor.host_pinning import HostPinner, is_available
 
 
 def shm_owner_process(shm_name_prefix, ready_event, finished_event, pinned_memory):
@@ -126,8 +118,8 @@ class TestMultiprocessSharedMemory:
         self._run_workflow(pinned_memory=False)
 
     @pytest.mark.skipif(
-        not (torch.cuda.is_available() and CUPY_AVAILABLE),
-        reason="requires CUDA and cupy for pinned memory",
+        not is_available(),
+        reason="requires CUDA host registration for pinned shared memory",
     )
     def test_shm_with_pinned_memory(self):
         self._run_workflow(pinned_memory=True)
@@ -137,18 +129,23 @@ class TestMultiprocessSharedMemory:
         # Use unique prefix to avoid collisions with leftover SHM from previous runs
         shm_name_prefix = f"test_mp_{os.getpid()}_{uuid.uuid4().hex[:8]}"
 
+        # CUDA cannot be reinitialized safely in a forked child. Use one
+        # explicit context for both synchronization primitives and workers so
+        # the pinned-memory case exercises a fresh CUDA runtime per process.
+        context = multiprocessing.get_context("spawn")
+
         # Create synchronization events
-        ready_event = multiprocessing.Event()
-        finished_event = multiprocessing.Event()
+        ready_event = context.Event()
+        finished_event = context.Event()
 
         try:
             # Create processes
-            owner_proc = multiprocessing.Process(
+            owner_proc = context.Process(
                 target=shm_owner_process,
                 args=(shm_name_prefix, ready_event, finished_event, pinned_memory),
             )
 
-            secondary_proc1 = multiprocessing.Process(
+            secondary_proc1 = context.Process(
                 target=secondary_process_1,
                 args=(shm_name_prefix, ready_event, finished_event, pinned_memory),
             )

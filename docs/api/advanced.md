@@ -69,3 +69,43 @@ for when to switch modes.
         - NoOpHostPinner
         - is_available
         - make_host_pinner
+
+## Shared Memory
+
+Coordination, shared ownership, and resident tensor storage for cross-process
+weight sharing. See
+[Low-level SHM protocol and ownership](../explanation/configuration.md#low-level-shm-protocol-and-ownership)
+for publication, failure, and lifetime semantics.
+
+::: flextensor.shm.coordinator.ShmCoordinator
+    options:
+      members:
+        - memory_owner
+        - wait_for_ready
+        - notify_ready
+        - mark_failed
+        - close
+
+::: flextensor.shm.coordinator.ShmCoordinatorError
+    options:
+      members: []
+
+::: flextensor.shm.coordinator.ShmCreatorFailedError
+    options:
+      members: []
+
+::: flextensor.shm.coordinator.ShmCreatorDiedError
+    options:
+      members: []
+
+::: flextensor.allocation_block.AllocationManager
+    options:
+      members: []
+
+::: flextensor.shm.tensor_store.SharedTensorStore
+    options:
+      members:
+        - create_from_model
+        - attach
+        - materialize_into
+        - close

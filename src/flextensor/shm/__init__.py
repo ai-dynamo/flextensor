@@ -7,7 +7,12 @@ and multiprocess coordination.
 """
 
 from flextensor.shm.coord_block import COORD_HEADER_SIZE, CoordBlockHeader
-from flextensor.shm.coordinator import ShmCoordinator
+from flextensor.shm.coordinator import (
+    ShmCoordinator,
+    ShmCoordinatorError,
+    ShmCreatorDiedError,
+    ShmCreatorFailedError,
+)
 from flextensor.shm.flexible_shm import FlexibleSharedMemory, KeepAlive
 from flextensor.shm.multiprocess_condition import (
     HEADER_SIZE,
@@ -36,6 +41,9 @@ __all__ = [
     "SemaphoreLock",
     "SharedMultiString",
     "ShmCoordinator",
+    "ShmCoordinatorError",
+    "ShmCreatorDiedError",
+    "ShmCreatorFailedError",
     "apply_rank_suffix",
     "compute_shm_namespace",
     "coord_block_name",

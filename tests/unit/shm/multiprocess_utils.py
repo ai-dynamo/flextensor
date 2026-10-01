@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Shared helpers for shm multiprocess tests.
+"""Shared helpers for SHM multiprocess tests.
 
-Centralizing these in conftest keeps timeout/cleanup behavior consistent across
-the suite and lets us bake exitcode and child-death checks into a single place.
+Centralizing these keeps timeout/cleanup behavior consistent across the suite
+and lets us bake exitcode and child-death checks into a single place.
 
 Event-wait timeouts default to 5s and are overridable per-run via
 ``FT_TEST_EVENT_TIMEOUT`` (e.g. ``FT_TEST_EVENT_TIMEOUT=15 pytest ...``) for
@@ -66,7 +66,7 @@ def assert_clean_exit(proc: BaseProcess, description: str) -> None:
     don't mask the real failure.
 
     Uses ``raise AssertionError`` rather than ``assert`` so the check survives
-    ``python -O`` (conftest helpers are not assertion-rewritten by pytest).
+    ``python -O``.
     """
     if proc.is_alive():
         msg = f"{description}: still alive after join (likely hung)"

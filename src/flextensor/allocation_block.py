@@ -33,6 +33,7 @@ class AllocationBlock:
         lock_class=None,
         *,
         host_pinner: HostPinner,
+        shm_owner: FlexibleSharedMemory | None = None,
         **config,
     ):
         self.manager = manager
@@ -44,6 +45,7 @@ class AllocationBlock:
         self.shm_block_name = shm_block_name
         self.lock_class = lock_class if lock_class is not None else ProcessFileLock
         self.shm_block = None
+        self.shm_owner = shm_owner
         self.pinned_memory = config.get("pinned_memory", False)
         self.host_pinner: HostPinner = host_pinner
         self.memory_alignment = config.get("memory_alignment", _DEFAULT_PACKED_TENSOR_ALIGNMENT_BYTES)
@@ -67,8 +69,6 @@ class AllocationBlock:
         self._prepare_block()
         if self.is_memory_creator:
             self._tensors_to_memory_block()
-            if self.shm_block is not None:
-                self.shm_block.notify_ready()
         self.tensors.clear()
         return self.views
 
@@ -92,11 +92,6 @@ class AllocationBlock:
                 self.block.stride(),
             ),
         )
-
-    def wait_for_block_ready(self):
-        if self.is_memory_creator or self.shm_block is None:
-            return
-        self.shm_block.wait_for_ready()
 
     def copy_to(self, tensor: torch.Tensor, non_blocking: bool = False):
         non_blocking = non_blocking and tensor.device.type == "cuda"
@@ -128,7 +123,7 @@ class AllocationBlock:
     def _make_base_block(self, nbytes: int, device: str = "cpu", pin_memory: bool = False):
         if self.shm_block_name is not None and device == "cpu":
             # Use shared memory
-            # ponytail: assumes >=1 GiB/s host registration; tune this constant if slower hosts appear.
+            # Assume at least 1 GiB/s host registration; tune this if slower hosts appear.
             lock_acquire_timeout = (
                 max(LOCK_ACQUIRE_TIMEOUT, nbytes / (1024**3 * _PINNED_SHM_GIB_PER_SECOND))
                 if pin_memory
@@ -140,6 +135,7 @@ class AllocationBlock:
                 pinned_memory=pin_memory,
                 lock_class=self.lock_class,
                 lock_acquire_timeout=lock_acquire_timeout,
+                _owner=self.shm_owner,
             )
             self.is_memory_creator = self.shm_block.shm_creator
             if self.is_memory_creator == self.load_from_shm:
@@ -202,6 +198,7 @@ class AllocationManager:
         pinned_memory: bool = False,
         *,
         host_pinner: HostPinner,
+        shm_owner: FlexibleSharedMemory | None = None,
         memory_alignment: int = _DEFAULT_PACKED_TENSOR_ALIGNMENT_BYTES,
         lock_class=None,
         release_tensor_memory: bool = False,
@@ -213,6 +210,7 @@ class AllocationManager:
         self.load_from_shm = load_from_shm
         self.pinned_memory = pinned_memory
         self.host_pinner = host_pinner
+        self.shm_owner = shm_owner
         self.memory_alignment = memory_alignment
         self.lock_class = lock_class if lock_class is not None else ProcessFileLock
         self.release_tensor_memory = release_tensor_memory
@@ -231,6 +229,7 @@ class AllocationManager:
             load_from_shm=self.load_from_shm,
             pinned_memory=self.pinned_memory,
             host_pinner=self.host_pinner,
+            shm_owner=self.shm_owner,
             memory_alignment=self.memory_alignment,
             release_tensor_memory=self.release_tensor_memory,
         )
@@ -256,6 +255,7 @@ class AllocationManager:
             load_from_shm=self.load_from_shm if device == "cpu" else False,
             pinned_memory=self.pinned_memory if device == "cpu" else False,
             host_pinner=self.host_pinner,
+            shm_owner=self.shm_owner,
         )
 
     def release(self):

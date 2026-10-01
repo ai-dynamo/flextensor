@@ -250,7 +250,11 @@ FT_PINNED_MEMORY_MODE=torch            # PyTorch's pinned allocator (default)
 !!! note "Scope of `pinned_memory_mode`"
     `pinned_memory_mode` only controls how the **non-SHM allocator path** pins host memory. When `shm_enabled=True` and `pinned_memory=True`, the SHM segment itself is registered in place via `cudaHostRegister` regardless of the mode you choose — POSIX shared-memory buffers can't be re-allocated through PyTorch's pinned allocator. This is why `OffloadConfig(shm_enabled=True, pinned_memory=True, pinned_memory_mode="torch")` already gives you in-place pinning for the SHM segment.
 
-    The two paths use different flags: the SHM path registers with `cudaHostRegisterDefault` (flag=0, current-context-only) through the `cupy` runtime binding, while the non-SHM `host_register` path registers with `cudaHostRegisterPortable` (flag=1, visible across CUDA contexts) through `torch.cuda.cudart()`. Single-context inference is unaffected by the difference; multi-context setups should expect the SHM segment to be re-registered per process.
+    SHM mappings and the non-SHM `"host_register"` path use `cudaHostRegisterPortable` through
+    `torch.cuda.cudart()`. The non-SHM `"torch"` path instead uses `tensor.pin_memory()` and copies
+    into a PyTorch-managed pinned allocation. CUDA host registration is process-local, so every
+    process that attaches to an SHM segment registers its own mapping and unregisters it during
+    teardown. CuPy is not required.
 
 !!! note "Resolved mode vs. requested mode"
     `OffloadConfig.pinned_memory_mode` always reports the value you set; it never mutates. Two construction-time outcomes can differ from a naive read of the field:
@@ -322,6 +326,42 @@ detection rather than a hard wall-clock timeout.
 
 These options can also be set via `FT_SHM_ENABLED`, `FT_SHM_NAMESPACE`, and
 `FT_SHM_WAIT_TIMEOUT` environment variables.
+
+##### Low-level SHM protocol and ownership
+
+SHM protocol v4 stores `INITIALIZING`, `READY`, or `FAILED` in the coordination
+header. The creator calls
+[`ShmCoordinator.notify_ready()`][flextensor.shm.coordinator.ShmCoordinator.notify_ready]
+after publication, or [`mark_failed(error)`][flextensor.shm.coordinator.ShmCoordinator.mark_failed]
+if initialization fails. Followers call
+[`wait_for_ready(timeout=...)`][flextensor.shm.coordinator.ShmCoordinator.wait_for_ready]:
+a published failure raises [`ShmCreatorFailedError`][flextensor.shm.coordinator.ShmCreatorFailedError],
+and an expired creator heartbeat during initialization raises
+[`ShmCreatorDiedError`][flextensor.shm.coordinator.ShmCreatorDiedError].
+The timeout includes coordination-lock acquisition; `None` has no overall wait limit.
+All participants must use the same FlexTensor and protocol versions. Restart them
+together when upgrading from v3.
+
+Heartbeat identities distinguish individual participants, including separate handles
+in the same process. [`ShmCoordinator.memory_owner`][flextensor.shm.coordinator.ShmCoordinator.memory_owner]
+lets profiles and tensor blocks share one heartbeat and lifetime. Pass it as `shm_owner` to
+[`AllocationManager`][flextensor.allocation_block.AllocationManager],
+[`SharedTensorStore.create_from_model()`][flextensor.shm.tensor_store.SharedTensorStore.create_from_model],
+or [`SharedTensorStore.attach()`][flextensor.shm.tensor_store.SharedTensorStore.attach]. Blocks
+remain attachable after the creator closes while another participant remains.
+Failed cleanup retains the resources needed to retry
+[`close()`][flextensor.shm.coordinator.ShmCoordinator.close].
+
+Owned blocks support the built-in file and semaphore lock backends. The ownership
+registry records their lock names as well as their SHM names, and the last participant
+unlinks both. Each block initializes under its own lock; the coordinator lock only
+protects registration and resource opening. Closing waits for local child setup to
+finish and rejects new setup. The coordinator's own lock remains stable across namespace reuse.
+
+[`SharedTensorStore`][flextensor.shm.tensor_store.SharedTensorStore] publishes resident parameters and
+registered buffers separately from offloaded allocation blocks. Followers validate
+the manifest's dtype, shape, stride, and byte ranges before copying tensors to
+their target device. Tied registrations and buffer persistence are preserved.
 
 ### Profiling Configuration
 

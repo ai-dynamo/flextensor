@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `flextensor.shm.tensor_store.SharedTensorStore` for publishing resident
+  parameters and registered buffers in shared memory. Followers validate the
+  manifest and copy tensors to their target device while preserving aliases.
 - Add `OffloadManager.offload_units()` / `resident_units()` (and matching
   package-level helpers) to list outermost offloaded and GPU-resident modules
   as `(name, module)` pairs for external per-unit compile.
@@ -25,8 +28,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release loader-backed weights without rebuilding private model storage.
   The default continues to preserve the released model.
 
+### Changed
+
+- **Breaking:** Upgrade the SHM protocol from v3 to v4, with unique participant
+  identities and explicit `INITIALIZING`, `READY`, and `FAILED` coordinator
+  states. All participants must use the same version and restart together.
+- Let profiles and tensor blocks share their coordinator's heartbeat and
+  lifetime, keeping names available until the last participant leaves.
+- Register pinned SHM mappings through `torch.cuda.cudart()` with portable host
+  registration; CuPy is no longer required.
+
 ### Fixed
 
+- Propagate creator initialization failures and expired heartbeats to waiting
+  followers, with optional bounded waits. Publish readiness in the coordinator
+  header instead of a separate per-block ready notification.
+- Clean up partial SHM setup and retain handles when teardown fails so cleanup
+  can be retried. Propagate lock-release errors and notify every local waiter
+  without losing semaphore ownership.
 - Allocation-block construction failures now restore released source tensors
   and clean up partially created CPU, GPU, and SHM blocks without masking the
   original error, including failures while constructing the transfer loader.

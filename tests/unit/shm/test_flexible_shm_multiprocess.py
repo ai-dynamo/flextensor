@@ -10,7 +10,7 @@ import time
 from typing import TYPE_CHECKING
 
 import pytest
-from conftest import (
+from shm.multiprocess_utils import (
     EVENT_TIMEOUT,
     POLL_INTERVAL,
     assert_clean_exit,
@@ -34,7 +34,6 @@ def create_and_write_process(
     name: str,
     shm_size: int,
     data_to_write: bytes | tuple[bytes, float],
-    notify_ready: bool,
     result_queue: Queue,
     lock_class: type,
     ready_event: EventType | None = None,
@@ -54,9 +53,6 @@ def create_and_write_process(
         )
 
         fsm.block.buf[: len(data_to_write)] = data_to_write
-
-        if notify_ready:
-            fsm.notify_ready()
 
         if ready_event is not None:
             ready_event.set()
@@ -90,7 +86,7 @@ def create_and_write_process(
         )
 
 
-def wait_and_read_process(
+def read_process(
     name: str,
     expected_data_len: int,
     result_queue: Queue,
@@ -99,7 +95,7 @@ def wait_and_read_process(
     ready_event: EventType | None = None,
     close_event: EventType | None = None,
 ) -> None:
-    """Wait for ready, read data, optionally stay alive until released."""
+    """Read data, optionally staying alive until released."""
     try:
         fsm = FlexibleSharedMemory(
             name=name,
@@ -107,10 +103,6 @@ def wait_and_read_process(
             pinned_memory=False,
             lock_class=lock_class,
         )
-
-        start_time = time.time()
-        fsm.wait_for_ready()
-        wait_time = time.time() - start_time
 
         read_data = bytes(fsm.block.buf[:expected_data_len])
 
@@ -128,9 +120,8 @@ def wait_and_read_process(
         result_queue.put(
             {
                 "success": True,
-                "action": "wait_and_read",
+                "action": "read",
                 "data_read": read_data,
-                "wait_time": wait_time,
                 "shm_creator": fsm.shm_creator,
                 "pid": os.getpid(),
             },
@@ -141,7 +132,7 @@ def wait_and_read_process(
             {
                 "success": False,
                 "error": f"{type(e).__name__}: {e}",
-                "action": "wait_and_read",
+                "action": "read",
                 "pid": os.getpid(),
             },
         )
@@ -378,10 +369,9 @@ def cleanup_flexible_shared_memory(name: str) -> None:
     # FlexibleSharedMemory naming:
     # - Main shm: name; main lock semaphore: name
     # - KeepAliveDict: sm_<name>_kd (shm), <name>_km (timestamps), <name>_ks (lock)
-    # - MultiprocessCondition: <name>_c (shm + semaphore lock)
-    for shm_name in (name, f"sm_{name}_kd", f"{name}_km", f"{name}_c"):
+    for shm_name in (name, f"sm_{name}_kd", f"{name}_km"):
         unlink_shared_memory_if_present(shm_name)
-    for sem_name in (name, f"{name}_ks", f"{name}_c"):
+    for sem_name in (name, f"{name}_ks"):
         unlink_semaphore_if_present(sem_name)
 
 
@@ -408,11 +398,11 @@ class TestFlexibleSharedMemoryMultiprocess:
 
         creator_proc = multiprocessing.Process(
             target=create_and_write_process,
-            args=(self.test_name, self.test_size, test_data, True, result_queue, lock_class),
+            args=(self.test_name, self.test_size, test_data, result_queue, lock_class),
             kwargs={"ready_event": creator_ready, "close_event": creator_close},
         )
         reader_proc = multiprocessing.Process(
-            target=wait_and_read_process,
+            target=read_process,
             args=(self.test_name, len(test_data), result_queue, 0, lock_class),
         )
 
@@ -430,7 +420,7 @@ class TestFlexibleSharedMemoryMultiprocess:
             results = drain_results(result_queue, expected_count=2)
 
             creator_result = next(r for r in results if r.get("action") == "create_and_write")
-            reader_result = next(r for r in results if r.get("action") == "wait_and_read")
+            reader_result = next(r for r in results if r.get("action") == "read")
 
             assert creator_result["success"] is True, f"Creator failed: {creator_result.get('error')}"
             assert reader_result["success"] is True, f"Reader failed: {reader_result.get('error')}"
@@ -439,7 +429,6 @@ class TestFlexibleSharedMemoryMultiprocess:
             assert reader_result["shm_creator"] is False
 
             assert reader_result["data_read"] == test_data
-            assert reader_result["wait_time"] <= 3.0
 
         finally:
             creator_close.set()
@@ -459,13 +448,13 @@ class TestFlexibleSharedMemoryMultiprocess:
 
         creator_proc = multiprocessing.Process(
             target=create_and_write_process,
-            args=(self.test_name, self.test_size, test_data, True, result_queue, lock_class),
+            args=(self.test_name, self.test_size, test_data, result_queue, lock_class),
             kwargs={"ready_event": creator_ready, "close_event": creator_close},
         )
 
         reader_procs = [
             multiprocessing.Process(
-                target=wait_and_read_process,
+                target=read_process,
                 args=(self.test_name, len(test_data), result_queue, 0, lock_class),
             )
             for _ in range(num_readers)
@@ -490,12 +479,11 @@ class TestFlexibleSharedMemoryMultiprocess:
             for result in results:
                 assert result["success"] is True, f"Failed: {result.get('error', 'unknown')}"
 
-            reader_results = [r for r in results if r.get("action") == "wait_and_read"]
+            reader_results = [r for r in results if r.get("action") == "read"]
             assert len(reader_results) == num_readers
 
             for reader_result in reader_results:
                 assert reader_result["data_read"] == test_data
-                assert reader_result["wait_time"] <= 5.0
 
         finally:
             creator_close.set()
@@ -517,7 +505,7 @@ class TestFlexibleSharedMemoryMultiprocess:
 
         creator_proc = multiprocessing.Process(
             target=create_and_write_process,
-            args=(self.test_name, self.test_size, init_data, False, result_queue, lock_class),
+            args=(self.test_name, self.test_size, init_data, result_queue, lock_class),
             kwargs={"ready_event": creator_ready, "close_event": creator_close},
         )
 
@@ -583,7 +571,6 @@ class TestFlexibleSharedMemoryMultiprocess:
                 self.test_name,
                 self.test_size,
                 b"keep_alive_test",
-                False,
                 result_queue,
                 lock_class,
             ),

@@ -6,7 +6,7 @@
 import pytest
 
 import flextensor
-from flextensor.shm.coord_block import COORD_HEADER_SIZE, CoordBlockHeader
+from flextensor.shm.coord_block import COORD_HEADER_SIZE, CoordBlockHeader, CoordinatorState
 
 
 class TestCoordBlockHeader:
@@ -25,6 +25,41 @@ class TestCoordBlockHeader:
         assert loaded.flextensor_version == flextensor.__version__
         assert loaded.protocol_version == 1
         assert loaded.creator_pid == 4_294_967_297
+        assert loaded.state is CoordinatorState.INITIALIZING
+        assert loaded.failure_message == ""
+
+    def test_failed_header_roundtrip(self):
+        """FAILED state and its bounded diagnostic survive serialization."""
+        header = CoordBlockHeader(
+            flextensor_version=flextensor.__version__,
+            protocol_version=4,
+            creator_pid=4_294_967_297,
+            state=CoordinatorState.FAILED,
+            failure_message="RuntimeError: checkpoint load failed",
+        )
+
+        buf = bytearray(COORD_HEADER_SIZE)
+        header.write_to(buf)
+
+        assert CoordBlockHeader.read_from(buf) == header
+
+    def test_failure_message_is_utf8_safely_truncated(self):
+        """A long multi-byte diagnostic never leaves partial UTF-8 on the wire."""
+        header = CoordBlockHeader(
+            flextensor_version=flextensor.__version__,
+            protocol_version=4,
+            creator_pid=1,
+            state=CoordinatorState.FAILED,
+            failure_message="ą" * 200,
+        )
+
+        buf = bytearray(COORD_HEADER_SIZE)
+        header.write_to(buf)
+        loaded = CoordBlockHeader.read_from(buf)
+
+        assert loaded.failure_message
+        assert len(loaded.failure_message.encode("utf-8")) <= 160
+        assert set(loaded.failure_message) == {"ą"}
 
     def test_version_mismatch_raises(self):
         """Mismatched FlexTensor version raises clear error."""
@@ -78,10 +113,41 @@ class TestCoordBlockHeader:
             protocol_version=3,
         )
 
-        with pytest.raises(RuntimeError, match="creator PID"):
+        with pytest.raises(RuntimeError, match="creator identity"):
             header.validate(
                 expected_version=flextensor.__version__,
                 expected_protocol=3,
+            )
+
+    def test_protocol_v4_rejects_unknown_state(self):
+        """Protocol v4 rejects corrupt or unknown lifecycle values."""
+        header = CoordBlockHeader(
+            flextensor_version=flextensor.__version__,
+            protocol_version=4,
+            creator_pid=1,
+            state=99,
+        )
+
+        with pytest.raises(RuntimeError, match="invalid coordinator state"):
+            header.validate(
+                expected_version=flextensor.__version__,
+                expected_protocol=4,
+            )
+
+    def test_non_failed_header_rejects_failure_message(self):
+        """Failure diagnostics cannot be published without the FAILED state."""
+        header = CoordBlockHeader(
+            flextensor_version=flextensor.__version__,
+            protocol_version=4,
+            creator_pid=1,
+            state=CoordinatorState.READY,
+            failure_message="should not be present",
+        )
+
+        with pytest.raises(RuntimeError, match="Only a FAILED"):
+            header.validate(
+                expected_version=flextensor.__version__,
+                expected_protocol=4,
             )
 
     def test_header_at_nonzero_offset(self):

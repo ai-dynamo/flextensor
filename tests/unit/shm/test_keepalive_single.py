@@ -19,7 +19,7 @@ def test_prepare_slot_rejects_exhausted_timestamp_view():
 
     with pytest.raises(
         RuntimeError,
-        match=r"timestamp slots exhausted: process_id=222, slot=1, timestamp_capacity=1",
+        match=r"timestamp slots exhausted: participant_id=222, slot=1, timestamp_capacity=1",
     ):
         keep_alive_dict.prepare_slot(222)
 
@@ -88,7 +88,7 @@ class TestKeepAliveSingle:
         try:
             with pytest.raises(
                 RuntimeError,
-                match=r"mapping storage exhausted: process_id=12345, slot=0, keep_alive_dict_size=8",
+                match=r"mapping storage exhausted: participant_id=12345, slot=0, keep_alive_dict_size=8",
             ):
                 keep_alive_dict.prepare_slot(self.process_id)
 
@@ -110,7 +110,7 @@ class TestKeepAliveSingle:
         try:
             with pytest.raises(
                 RuntimeError,
-                match=r"mapping storage exhausted: process_id=12345, slot=0, keep_alive_dict_size=8",
+                match=r"mapping storage exhausted: participant_id=12345, slot=0, keep_alive_dict_size=8",
             ):
                 KeepAlive(
                     name=self.test_name,

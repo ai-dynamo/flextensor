@@ -19,7 +19,13 @@ import uuid
 from typing import TYPE_CHECKING
 
 import pytest
-from conftest import EVENT_TIMEOUT, assert_clean_exit, drain_results, format_failed_results, wait_for_event
+from shm.multiprocess_utils import (
+    EVENT_TIMEOUT,
+    assert_clean_exit,
+    drain_results,
+    format_failed_results,
+    wait_for_event,
+)
 
 from flextensor.shm import FlexibleSharedMemory, ProcessFileLock, SemaphoreLock
 
@@ -62,11 +68,6 @@ def lifecycle_process(
         if data_to_write is not None:
             offset = process_id * 32
             fsm.block.buf[offset : offset + len(data_to_write)] = data_to_write
-
-        if fsm.shm_creator:
-            fsm.notify_ready()
-        else:
-            fsm.wait_for_ready()
 
         data_from_p0 = bytes(fsm.block.buf[0:14])
 

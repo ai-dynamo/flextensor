@@ -3,9 +3,11 @@
 """Single-process unit tests for SharedMultiString class."""
 
 import struct
+from multiprocessing.shared_memory import SharedMemory
 
 import pytest
 
+import flextensor.shm.multiprocess_condition as condition_module
 from flextensor.shm import HEADER_SIZE, SharedMultiString
 
 
@@ -49,6 +51,51 @@ class TestSharedMultiStringSingle:
 
         sms.close()
         sms.unlink()
+
+        with pytest.raises(FileNotFoundError):
+            SharedMemory(name=self.test_name, create=False)
+
+    @pytest.mark.parametrize("unlink_error", [FileNotFoundError(), PermissionError("denied")])
+    def test_unlink_name_balances_tracker_after_unlink_failure(self, monkeypatch, unlink_error):
+        """A failed unlink must undo the temporary resource-tracker registration."""
+        calls = []
+        tracker_name = f"/{self.test_name}"
+
+        class MissingSharedMemory(SharedMemory):
+            def __init__(self):
+                self._name = tracker_name
+
+            def unlink(self):
+                raise unlink_error
+
+            def close(self):
+                pass
+
+        sms = SharedMultiString.__new__(SharedMultiString)
+        sms.shm = MissingSharedMemory()
+        sms._name_unlinked = False
+        monkeypatch.setattr(
+            condition_module,
+            "resource_tracker_register",
+            lambda name, kind: calls.append(("register", name, kind)),
+        )
+        monkeypatch.setattr(
+            condition_module,
+            "resource_tracker_unregister",
+            lambda name, kind: calls.append(("unregister", name, kind)),
+        )
+
+        if isinstance(unlink_error, FileNotFoundError):
+            sms.unlink_name()
+        else:
+            with pytest.raises(PermissionError, match="denied"):
+                sms.unlink_name()
+
+        assert calls == [
+            ("register", f"/{self.test_name}", "shared_memory"),
+            ("unregister", f"/{self.test_name}", "shared_memory"),
+        ]
+        assert sms._name_unlinked is isinstance(unlink_error, FileNotFoundError)
 
     def test_append_single_string(self):
         """Test appending a single string."""

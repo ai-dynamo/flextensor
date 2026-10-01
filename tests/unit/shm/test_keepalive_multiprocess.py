@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import posix_ipc
 import pytest
-from conftest import (
+from shm.multiprocess_utils import (
     EVENT_TIMEOUT,
     POLL_INTERVAL,
     assert_clean_exit,

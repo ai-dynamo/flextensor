@@ -96,7 +96,6 @@ strict_equality = true
 [[tool.mypy.overrides]]
 module = [
     "beartype", "beartype.claw",
-    "cupy", "cupy.cuda", "cupy.cuda.runtime",
     "posix_ipc",
     "proxytypes3",
     "safetensors", "safetensors.torch",
