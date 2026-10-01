@@ -10,7 +10,7 @@ dynamic = ["version"]
 description = "FlexTensor: Tensor offloading and management library"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 keywords = ["tensor", "offloading", "machine learning", "pytorch", "memory management"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -18,21 +18,24 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: POSIX",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "beartype~=0.21",
+    "beartype~=0.21; python_version < '3.14'",
+    "beartype>=0.22.2,<1; python_version >= '3.14'",
     "numpy>=1.20.0",
     "psutil>=5.9.0",
-    "pydantic>=2.7.0",
+    "pydantic>=2.7.0; python_version < '3.14'",
+    "pydantic>=2.12; python_version >= '3.14'",
     "pyyaml>=6.0",
     # Pytorch 2.5+ required for torch.Event
-    "torch>=2.5",
+    "torch>=2.5; python_version < '3.14'",
+    "torch>=2.10; python_version >= '3.14'",
     "scipy>=1.9.0",
     "proxytypes3>=1.0.1",
     "posix-ipc~=1.3.0",
@@ -46,7 +49,6 @@ test = [
     "pytest-cov>=4.0.0",
     "mypy>=1.10",
     "requests~=2.32",
-    "tomli>=2.0; python_version < '3.11'",
     "types-PyYAML>=6.0",
     "types-psutil>=5.9",
     "scipy-stubs>=1.4",
@@ -227,7 +229,7 @@ forbidden_modules = ["flextensor.*"]
 
 [tool.ruff]
 preview = true
-target-version = "py310"
+target-version = "py311"
 line-length = 120
 indent-width = 4
 

@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 import logging
+from typing import Self
 
 import torch
-from typing_extensions import Self
 
 from flextensor.host_pinning import HostPinner
 from flextensor.shm import FlexibleSharedMemory, ProcessFileLock

@@ -15,11 +15,10 @@ import os
 import types
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Annotated, Any, Literal, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Self, Union, get_args, get_origin
 
 import yaml
 from pydantic import BaseModel, Field, WithJsonSchema, field_validator, model_validator
-from typing_extensions import Self
 
 from flextensor.host_pinning import PinnedMemoryMode
 from flextensor.strategy import AdaptiveStrategy, Strategy

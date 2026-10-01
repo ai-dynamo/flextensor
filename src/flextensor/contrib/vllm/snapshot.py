@@ -18,7 +18,7 @@ Usage (FlexTensor):
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -167,7 +167,7 @@ class MemorySnapshotMixin:
         output_dir = Path(output_dir_str)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
         filename = f"gpu_snapshots_rank{self.rank}_device{self.local_rank}_{ts}.json"  # type: ignore[attr-defined]
         output_path = output_dir / filename
 

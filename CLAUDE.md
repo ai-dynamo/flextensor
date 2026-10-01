@@ -10,7 +10,7 @@ PyTorch tensor offloading library — GPU ↔ CPU for large models on limited GP
 
 ## Stack
 
-Python 3.10+ | PyTorch >=2.5 (CUDA) | beartype | pydantic | psutil | scipy | ruff | mypy strict | pytest | uv
+Python 3.11+ | PyTorch >=2.5 (CUDA; >=2.10 on Python 3.14) | beartype | pydantic | psutil | scipy | ruff | mypy strict | pytest | uv
 
 ---
 
@@ -46,7 +46,7 @@ tests/
 
 ```bash
 # Setup
-uv venv --python 3.10 .venv && source .venv/bin/activate
+uv venv --python 3.11 .venv && source .venv/bin/activate
 uv pip install --group dev -e . && pre-commit install
 
 # Unit tests (no GPU)
@@ -72,7 +72,7 @@ Each worktree needs its own `.venv` — the editable install is path-specific:
 
 ```bash
 cd .worktrees/<branch>
-uv venv --python 3.10 .venv && source .venv/bin/activate
+uv venv --python 3.11 .venv && source .venv/bin/activate
 uv pip install --group test -e .
 ```
 
