@@ -10,14 +10,16 @@ import contextlib
 import logging
 import os
 import struct
+import sys
 from collections import Counter
 from multiprocessing.resource_tracker import register as resource_tracker_register
 from multiprocessing.resource_tracker import unregister as resource_tracker_unregister
 from multiprocessing.shared_memory import SharedMemory
 
-import posix_ipc
-
 from flextensor.shm.sync_primitives import BaseLock, ProcessFileLock, SemaphoreLock
+
+if sys.platform != "win32":
+    import posix_ipc
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,8 @@ class SharedMultiString:
             create: If True, create the shared memory; otherwise connect to existing.
         """
         # Respect the create parameter
+        if sys.platform == "win32":
+            raise NotImplementedError("Shared memory (SHM) is not supported on Windows")
         self.shm: SharedMemory | None = None
         self._created = False
         if create:

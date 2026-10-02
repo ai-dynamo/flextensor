@@ -302,6 +302,9 @@ FT_MAX_GPU_MEM_FRACTION=none  # Use latency mode explicitly (also accepts "null"
 
 #### Shared Memory (Cross-Process Weight Sharing)
 
+Shared memory requires POSIX and is not supported on Windows, including
+`shm_enabled=True` and `SharedOffloadSession`.
+
 `shm_enabled=True` selects POSIX-SHM allocation but does not elect a creator or
 construct followers. For workers sharing a profiled model, use
 [`SharedOffloadSession`][flextensor.shared_offload.SharedOffloadSession]. It owns

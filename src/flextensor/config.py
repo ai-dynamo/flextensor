@@ -12,6 +12,7 @@ import difflib
 import json
 import logging
 import os
+import sys
 import types
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -473,6 +474,8 @@ class OffloadConfig(BaseModel):
     @model_validator(mode="after")
     def _validate_shm_namespace(self) -> Self:
         """Require a stable, visible namespace whenever SHM is enabled."""
+        if self.shm_enabled and sys.platform == "win32":
+            raise ValueError("Shared memory (SHM) is not supported on Windows")
         if self.shm_enabled and (self.shm_namespace is None or not self.shm_namespace.strip()):
             raise ValueError("shm_namespace must be non-empty when shm_enabled=True")
         return self

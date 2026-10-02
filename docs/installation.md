@@ -12,6 +12,10 @@
 
 Python 3.14 requires PyTorch 2.10 or higher.
 
+Shared memory (SHM) is not supported on Windows. The `posix-ipc` dependency is
+skipped on Windows; keep `shm_enabled=False` (the default) and do not use
+`SharedOffloadSession` there.
+
 ## Install from Package
 
 FlexTensor is available on PyPI. Use the following command to install:

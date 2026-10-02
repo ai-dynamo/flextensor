@@ -23,7 +23,7 @@ Thread Safety:
 
 import _thread
 import contextlib
-import fcntl
+import sys
 import tempfile
 import threading
 import time
@@ -31,7 +31,10 @@ import weakref
 from abc import ABC, abstractmethod
 from typing import ClassVar
 
-import posix_ipc
+if sys.platform != "win32":
+    import fcntl
+
+    import posix_ipc
 
 
 class BaseLock(ABC):
@@ -128,6 +131,8 @@ class SemaphoreLock(BaseLock):
                 - False: blocking acquire (waits)
             create: Create the semaphore when it does not already exist.
         """
+        if sys.platform == "win32":
+            raise NotImplementedError("Shared memory (SHM) is not supported on Windows")
         self.name = name if name.startswith("/") else f"/{name}"
         self._init_non_blocking = non_blocking
         self._held = False
@@ -269,6 +274,8 @@ class ProcessFileLock(BaseLock):
         from pathlib import Path
 
         # Handle path construction
+        if sys.platform == "win32":
+            raise NotImplementedError("Shared memory (SHM) is not supported on Windows")
         self.path = self.resolve_path(path)
 
         # Ensure directory exists

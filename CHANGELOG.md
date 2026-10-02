@@ -50,6 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Skip the `posix-ipc` dependency and POSIX-only imports on Windows to unblock
+  installation and use without shared memory (SHM). SHM remains unsupported on Windows.
 - Restore SHM profiles with an explicit creator or follower role. Creators discard
   saved block names and publish fresh allocations; followers validate published
   metadata before attaching. Failed restoration retains unfinished cleanup and

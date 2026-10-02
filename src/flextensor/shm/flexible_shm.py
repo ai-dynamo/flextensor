@@ -11,6 +11,7 @@ import json
 import math
 import os
 import secrets
+import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -20,13 +21,15 @@ from multiprocessing.shared_memory import SharedMemory
 from pathlib import Path
 from typing import Any, ClassVar
 
-import posix_ipc
 import torch
 from shared_memory_dict import SharedMemoryDict
 
 from flextensor.host_pinning import HostPinRegistry
 from flextensor.shm.multiprocess_condition import SharedMultiString
 from flextensor.shm.sync_primitives import BaseLock, ProcessFileLock, SemaphoreLock
+
+if sys.platform != "win32":
+    import posix_ipc
 
 LOCK_ACQUIRE_TIMEOUT = 5.0  # Must be float for beartype type checking
 _PARTICIPANT_COUNTER_BITS = 32
@@ -483,6 +486,8 @@ class FlexibleSharedMemory:
                 Owned blocks close locally; the last coordinator unlinks their names.
 
         """
+        if sys.platform == "win32":
+            raise NotImplementedError("Shared memory (SHM) is not supported on Windows")
         self.name = name
         self.shm_size = shm_size
         self.pid = os.getpid()

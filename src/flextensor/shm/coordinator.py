@@ -7,15 +7,17 @@ from __future__ import annotations
 
 import logging
 import math
+import sys
 import time
-
-import posix_ipc
 
 from flextensor._version import __version__
 from flextensor.shm.coord_block import CoordBlockHeader, CoordinatorState
 from flextensor.shm.flexible_shm import FlexibleSharedMemory
 from flextensor.shm.namespace import SHM_PROTOCOL_VERSION, coord_block_name, profile_block_name
 from flextensor.state_handler import TensorManagerState, TensorManagerStateHandler
+
+if sys.platform != "win32":
+    import posix_ipc
 
 logger = logging.getLogger(__name__)
 

@@ -17,6 +17,7 @@ import logging
 import math
 import os
 import re
+import sys
 import threading
 from collections import Counter
 from collections.abc import Callable, Iterable  # noqa: TC003 - beartype resolves public annotations at runtime.
@@ -127,6 +128,8 @@ class SharedOffloadSession:
     """
 
     def __init__(self, namespace: str, *, wait_timeout: Any = 300.0) -> None:
+        if sys.platform == "win32":
+            raise NotImplementedError("Shared memory (SHM) is not supported on Windows")
         normalized_namespace, normalized_timeout = _normalize_shared_offload_options(namespace, wait_timeout)
 
         self.namespace = normalized_namespace
