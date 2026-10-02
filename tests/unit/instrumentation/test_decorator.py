@@ -22,6 +22,23 @@ def registry():
 class TestInstrumentableDecorator:
     """Tests for the @instrumentable decorator."""
 
+    def test_cyclic_list_argument_keeps_instrumentation_record(self, registry) -> None:
+        """A cyclic argument should be marked rather than dropping the whole record."""
+
+        @instrumentable
+        class Consumer:
+            def __init__(self, values: list[object]) -> None:
+                self.values = values
+
+        values: list[object] = []
+        values.append(values)
+        obj = Consumer(values)
+
+        assert obj.values is values
+        records = registry.get_records()
+        assert len(records) == 1
+        assert records[0].args == {"values": ["<circular reference>"]}
+
     def test_basic_decoration(self, registry):
         """Test basic class decoration with positional and keyword args."""
 

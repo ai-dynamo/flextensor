@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve instrumentation records with cyclic list or tuple arguments by
+  serializing back-references as circular-reference markers.
+
 ## [0.4.0] — 2026-08-17
 
 ### Added

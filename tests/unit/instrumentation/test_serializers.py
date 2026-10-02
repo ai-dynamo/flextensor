@@ -434,6 +434,36 @@ class TestSerializeArgs:
 class TestCircularReferences:
     """Tests for handling circular references during serialization."""
 
+    def test_serialize_self_referencing_list(self) -> None:
+        """A list's back-reference becomes the same marker used for objects."""
+        values: list[object] = ["value"]
+        values.append(values)
+
+        result = serialize_args({"values": values})
+
+        assert json.loads(json.dumps(result)) == {"values": ["value", CIRCULAR_REF_MARKER]}
+
+    def test_serialize_tuple_list_cycle(self) -> None:
+        """Tuples participate in ancestor tracking when a list points back to them."""
+        values: list[object] = []
+        outer = (values,)
+        values.append(outer)
+
+        assert serialize_value(outer) == [[CIRCULAR_REF_MARKER]]
+
+    def test_serialize_list_mapping_cycle(self) -> None:
+        """A mixed cycle stops at the first repeated collection on the path."""
+        values: list[object] = []
+        values.append({"owner": values})
+
+        assert serialize_value(values) == [{"owner": CIRCULAR_REF_MARKER}]
+
+    def test_serialize_shared_list_is_not_a_cycle(self) -> None:
+        """Reusing one list as siblings still serializes each occurrence in full."""
+        shared = [1, [2]]
+
+        assert serialize_value([shared, shared]) == [[1, [2]], [1, [2]]]
+
     def test_serialize_self_referencing_object(self):
         """Test serializing an object that references itself."""
         obj = CircularRefA("self_ref")

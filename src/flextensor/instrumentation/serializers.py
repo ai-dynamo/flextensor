@@ -33,11 +33,18 @@ def _serialize_pydantic_model(value: BaseModel) -> dict[str, Any]:
     }
 
 
-def _serialize_collection(value: list | tuple | set, seen: set[int]) -> list[Any]:
-    """Serialize a list, tuple, or set."""
-    if isinstance(value, set):
-        return [_serialize_value_impl(item, seen) for item in sorted(value, key=lambda x: str(x))]
-    return [_serialize_value_impl(item, seen) for item in value]
+def _serialize_collection(value: list | tuple | set, seen: set[int]) -> list[Any] | str:
+    """Serialize a collection, tracking only the current ancestor path."""
+    obj_id = id(value)
+    if obj_id in seen:
+        return CIRCULAR_REF_MARKER
+    seen.add(obj_id)
+    try:
+        if isinstance(value, set):
+            return [_serialize_value_impl(item, seen) for item in sorted(value, key=lambda x: str(x))]
+        return [_serialize_value_impl(item, seen) for item in value]
+    finally:
+        seen.discard(obj_id)
 
 
 def _serialize_callable(value: Any) -> str:
