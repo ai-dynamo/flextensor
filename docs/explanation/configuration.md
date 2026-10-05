@@ -356,6 +356,27 @@ sessions because published blocks must remain fixed. Failed initialization
 publishes the creator error before cleanup when possible. Failed cleanup retains
 the remaining resources so `close()` can be retried.
 
+If workers were killed before closing, reclaim their resources explicitly with
+[`cleanup_namespace(...)`][flextensor.shared_offload.SharedOffloadSession.cleanup_namespace]:
+
+```python
+ft.SharedOffloadSession.cleanup_namespace(
+    "my_run", manager_names=["model"], timeout=60
+)
+```
+
+Pass the exact base namespace and manager names used by that run. Stop all its
+workers and prevent new joins first. The caller must share their IPC namespace
+and lock-directory view (`TMPDIR`). Cleanup uses the ownership journal and
+heartbeat leases, without creating a coordinator, loading models, or probing
+PIDs across containers. Killed participants' leases expire after 30 seconds.
+`timeout` bounds waiting across all requested managers; zero attempts cleanup
+immediately. Missing generations are a no-op. Unknown protocols or malformed
+metadata raise an error without guessing resource ownership. Earlier managers
+may already be removed if a later one fails; retrying is safe. Stable setup-lock
+files remain to preserve synchronization. A supervisor or operator must run
+cleanup if the entire serving launcher is killed.
+
 The lower-level `OffloadManager` path requires both `shm_enabled=True` and an
 explicit non-empty `shm_namespace`; its caller owns coordination and lifecycle.
 A stable model identity can first be converted with

@@ -4,10 +4,13 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
 BASE="${BASE:-$WORKSPACE_DIR/outpaint}"
-EX="${EX:-/my_home/flex-tensor/examples/ltx23/outpaint}"
+EX="${EX:-$SCRIPT_DIR}"
+FLEXTENSOR_DIR="${FLEXTENSOR_DIR:-$EX/../../..}"
 LTX_DIR="${LTX_DIR:-$BASE/LTX-2}"
+LTX2_COMMIT="${LTX2_COMMIT:-4f8905737aac86a554637cac86c178877a39c744}"
 VENV_DIR="${VENV_DIR:-$WORKSPACE_DIR/.venv}"
 INPUT_DIR="${INPUT_DIR:-$BASE/inputs}"
 OUTPUT_DIR="${OUTPUT_DIR:-$BASE/outputs}"
@@ -147,16 +150,27 @@ PY
 
 validate_num_frames
 validate_context_parallel_size
+if [[ ! -f "$FLEXTENSOR_DIR/pyproject.toml" ]]; then
+  echo "FlexTensor checkout not found at $FLEXTENSOR_DIR (missing pyproject.toml)." >&2
+  echo "Set FLEXTENSOR_DIR to the FlexTensor repository root or EX to this example directory." >&2
+  exit 1
+fi
+FLEXTENSOR_DIR="$(cd -- "$FLEXTENSOR_DIR" && pwd -P)"
 mkdir -p "$BASE" "$INPUT_DIR" "$OUTPUT_DIR" "$WORKSPACE_DIR" "$HF_HOME" "$HF_HUB_CACHE" "$HF_XET_CACHE" "$XDG_CACHE_HOME"
 
 apt-get update
-apt-get install -y nginx
+apt-get install -y nginx numactl
 
 if [[ ! -d "$LTX_DIR/.git" ]]; then
   git clone https://github.com/Lightricks/LTX-2.git "$LTX_DIR"
 else
   echo "Using existing LTX checkout at $LTX_DIR"
 fi
+
+if ! git -C "$LTX_DIR" cat-file -e "${LTX2_COMMIT}^{commit}"; then
+  git -C "$LTX_DIR" fetch origin "$LTX2_COMMIT"
+fi
+git -C "$LTX_DIR" checkout --detach "$LTX2_COMMIT"
 
 cd "$LTX_DIR"
 
@@ -166,7 +180,7 @@ fi
 
 export UV_PROJECT_ENVIRONMENT="$VENV_DIR"
 uv sync
-uv pip install --python "$PY" "flextensor==0.2.1"
+uv pip install --python "$PY" -e "$FLEXTENSOR_DIR"
 
 shopt -s nullglob
 LTX23_HF_REPO="models--Lightricks--LTX-2.3"

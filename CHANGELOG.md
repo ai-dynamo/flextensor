@@ -13,10 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add coordinated node-wide shared-memory serving to the LTX 2.3 Outpaint
+  NGINX example. The launcher generates one run-scoped namespace, validates
+  profiles, and performs bounded process-group teardown. Direct serving defaults
+  to private weights and supports SHM via `--shm-namespace`; `single_serve.sh`
+  remains non-SHM.
 - Add `SharedOffloadSession` for coordinated loading from profiles. The elected
   creator loads checkpoint data and publishes live state; followers build model
   skeletons and attach shared weights. Sessions reserve named managers and retain
-  resources until cleanup succeeds.
+  resources until cleanup succeeds. `cleanup_namespace()` reclaims abandoned
+  generations after workers stop without loading models.
 - Add `TensorManager.export_state()` to publish current tensor IDs, shared block
   names, and managed-tensor dtypes, shapes, and strides. Existing schema-v3 disk
   profiles remain loadable by creators, which rebuild this metadata at runtime.

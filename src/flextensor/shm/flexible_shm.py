@@ -849,8 +849,19 @@ class FlexibleSharedMemory:
 
     @staticmethod
     def _unlink_owned_resources(names: SharedMultiString) -> None:
-        """Unlink journaled resources under the owner lock, retaining the journal on failure."""
+        """Validate, fence, and unlink under the owner lock, retaining the journal on failure."""
         resources = [json.loads(record) for record in names.get_list()]
+        for record in resources:
+            if (
+                not isinstance(record, list)
+                or not record
+                or not isinstance(record[0], str)
+                or record[0] not in {"shm", "file", "semaphore"}
+                or len(record) != (2 if record[0] == "shm" else 3)
+                or not all(isinstance(value, str) and value for value in record)
+            ):
+                raise RuntimeError("Invalid shared-memory ownership journal record")
+        names.set_ready()  # Fence old mappings before removing any resource names.
         for kind, name, *_ in resources:
             if kind == "shm":
                 with contextlib.suppress(posix_ipc.ExistentialError):
@@ -873,12 +884,13 @@ class FlexibleSharedMemory:
             return
         if self.keep_alive is None or not self.keep_alive.any_process_alive(lock_timeout=LOCK_ACQUIRE_TIMEOUT):
             if self._owned_names is not None:
-                self._owned_names.set_ready()  # This generation admits no more opens.
                 self._owns_child_teardown = True
                 self._unlink_owned_resources(self._owned_names)
-            self._unlink_main_shm_name()
             if self.keep_alive is not None:
                 self.keep_alive.unlink_names()
+            # Retain the protocol anchor until all other metadata is gone so
+            # explicit namespace cleanup can resume an interrupted teardown.
+            self._unlink_main_shm_name()
 
     def _acquire_teardown_coordination(self) -> None:
         """Acquire the main-lock anchor, retaining all state on failure."""

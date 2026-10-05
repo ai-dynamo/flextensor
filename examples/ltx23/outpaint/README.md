@@ -175,7 +175,10 @@ Start from an NGC PyTorch container with the workspace mounted:
 ```bash
 mkdir -p /tmp/ltx23-outpaint
 docker run -it --gpus all --ipc=host \
+  --cap-add SYS_NICE \
   -e CUDA_VISIBLE_DEVICES=0 \
+  --ulimit memlock=-1:-1 \
+  --ulimit nofile=4096:4096 \
   -e HF_HOME=/workspace/hf \
   -e HUGGINGFACE_HUB_CACHE=/workspace/hf/hub \
   -v /tmp/ltx23-outpaint:/workspace \
@@ -184,14 +187,39 @@ docker run -it --gpus all --ipc=host \
   nvcr.io/nvidia/pytorch:26.03-py3
 ```
 
+With `--ipc=host`, the workers use the host's `/dev/shm`; Docker's
+`--shm-size` does not resize that host tmpfs. Check `df -h /dev/shm` and size
+the host mount for the shared managed weights, resident-tensor store, and
+coordination metadata. If you adapt the setup to use Docker's private IPC
+namespace instead, all workers must remain in that one namespace and the
+container needs a correspondingly large `--shm-size`. Unlimited memlock lets
+FlexTensor register the shared host pages for CUDA transfers. The higher
+`nofile` limit covers shared-memory mappings, coordinator heartbeat resources,
+and per-block lock handles kept open by each worker.
+
+`--cap-add SYS_NICE` allows the NUMA policy calls used by `numactl` under
+Docker's default seccomp profile. Put it before the image name, as above.
+`nginx_serve.sh` enables NUMA interleaving by default; the Docker option alone
+does not select a memory policy or change CPU priority. `setup.sh` installs
+`numactl` alongside NGINX. For a manual installation, run
+`apt-get update && apt-get install -y nginx numactl` inside the container.
+
 Clone LTX-2 and install the pipeline packages, then install this FlexTensor checkout into the LTX environment:
 
 ```bash
 git clone https://github.com/Lightricks/LTX-2.git /workspace/LTX-2
+git -C /workspace/LTX-2 checkout --detach 4f8905737aac86a554637cac86c178877a39c744
 cd /workspace/LTX-2
 uv sync --frozen
 uv pip install --python .venv/bin/python -e /path/to/flextensor
 ```
+
+The example is pinned to the tested LTX-2 revision `4f890573`; current upstream
+uses a different `ICLoraPipeline` API. `setup.sh` checks out that revision and
+performs the editable FlexTensor install automatically. It derives the
+FlexTensor root from `EX`; set
+`FLEXTENSOR_DIR=/path/to/flextensor` when the example directory is mounted
+separately from its checkout.
 
 The serving script resolves model files from Hugging Face when authentication/cache is configured, or you can pass local paths:
 
@@ -395,6 +423,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 \
   --host 127.0.0.1 --port 8020
 ```
 
+This direct command does not enable the coordinated SHM path, so restarting
+the independently loaded rank group is safe.
+
 ## Request
 
 Issue a local request with `POST /`. `conditioning_video` is the already-letterboxed source; `frame_rate` is flexible (15 or 24 fps both work). Add `"gamma": 2.0` for dark scenes.
@@ -456,20 +487,20 @@ overridden explicitly.
 
 For CP greater than 1, a replica that cannot dispatch a command or complete the
 status exchange exits without running potentially blocking NCCL destructors.
-`torchrun` terminates the other ranks and restarts the complete rank group up to
-`TORCHRUN_MAX_RESTARTS` times (default `3`). Set it to `0` to disable restarts.
-A failed CP1 worker instead makes `nginx_serve.sh` exit immediately. After a
-CP1 failure or exhaustion of the CP2/CP4/CP8 restart budget, an external service
-manager can restart the launcher or alert an operator.
+`torchrun` terminates the other ranks. Because the NGINX launcher uses one
+coordinated SHM generation, it sets `TORCHRUN_MAX_RESTARTS=0` and rejects
+positive values instead of restarting the rank group. A failed CP1 worker
+instead makes `nginx_serve.sh` exit immediately. An external service manager
+can restart the launcher or alert an operator.
 
 The leader distinguishes coordinated request failures from fatal CUDA or
 distributed-runtime failures. Recoverable validation and model errors return
 `400` or `500` and leave the replica available. A fatal error marks the replica
 unhealthy, returns `503` when possible, shuts down the HTTP loop, and exits
-non-zero. For CP greater than 1, `torchrun` restarts the replica within its
-configured budget; a CP1 worker relies on its external supervisor to restart
-the launcher. `/healthz` returns `503` whenever it can observe the poisoned
-state; otherwise the listener closes during shutdown. The health check
+non-zero. For CP greater than 1, `torchrun` terminates the other ranks without
+restarting the SHM generation; a CP1 worker relies on its external supervisor
+to restart the launcher. `/healthz` returns `503` whenever it can observe the
+poisoned state; otherwise the listener closes during shutdown. The health check
 deliberately performs no collective.
 
 `SIGTERM` and `SIGINT` handlers are active before distributed initialization
@@ -487,10 +518,121 @@ are still handled, but the agent's own worker-close timeout can send `SIGKILL`
 before a multi-minute request finishes, regardless of the orchestrator's
 longer grace period. `SIGKILL` cannot run the shutdown handshake.
 
+`nginx_serve.sh` always enables node-wide weight sharing. It generates
+`SHM_NAMESPACE` automatically and passes it to each worker as
+`--shm-namespace`; you do not need to supply that flag to the launcher.
+
+The launcher tracks each CP rank's process group before model loading, so
+cleanup can terminate ranks even after their `torchrun` agent exits. Shutdown
+sends `SIGTERM`, waits up to `WORKER_TERM_GRACE` seconds (default `600`), then
+sends `SIGKILL` to surviving agent and rank groups. Ranks that start after
+cleanup closes registration exit without loading a model. Allow at least the
+longest expected request duration for graceful draining. The launcher's grace
+period does not override `torchrun`'s own timeout described above.
+
+After confirming that all recorded workers and ranks have stopped, the launcher
+runs `cleanup_shm.py` on normal exit, startup failure, and worker failure. It
+reclaims the run's stage1, stage2, and text SHM resources without loading models
+or using a GPU. Killed workers' heartbeat leases can take 30 seconds to expire;
+the helper waits up to 60 seconds across all three managers. SIGKILL warnings
+include the run namespace. `Worker processes stopped.` confirms process shutdown;
+`SHM cleanup verified for namespace: ...` confirms SHM reclamation. Cleanup errors
+are reported and make an otherwise successful launcher exit non-zero; an existing
+failure or signal exit status is preserved.
+
+If the launcher or whole container is killed, its cleanup cannot run. After
+stopping **all** workers using the logged namespace and preventing new joins,
+run this command from a surviving container or supervisor with FlexTensor
+installed, the same IPC namespace (for example `--ipc=host`), and the same
+lock-directory view (`TMPDIR`, normally `/tmp`):
+
+```bash
+/workspace/.venv/bin/python /my_home/flex-tensor/examples/ltx23/outpaint/cleanup_shm.py \
+  --shm-namespace '<namespace from the launcher log>'
+```
+
+This command is safe to repeat. It checks heartbeat leases without probing PIDs,
+which can refer to different processes across containers. It refuses fresh
+participants, unknown protocols, or malformed metadata; resolve the reported
+error and retry. Do not delete `/dev/shm` files by glob. For recovery from another
+container, both containers must share the actual lock directory, not just use
+the same path string. Keep using a fresh namespace for each launch.
+
+For direct `serve_infer.py serve` invocations, supply `--shm-namespace` to
+enable SHM, or omit it for private weights. `single_serve.sh` always uses the
+non-SHM path.
+
+`SharedOffloadSession` independently elects a creator for stage1, stage2, and
+the optional text manager, so on an eight-GPU launch each enabled manager has
+one full-model creator and seven meta-model followers. A creator failure,
+invalid shared state, or follower timeout fails startup rather than falling
+back to private loads.
+
 The HTTP API does not change when NGINX is enabled. Requests still pass
 `conditioning_video` and `output_path` as filesystem paths, so every worker
 must see the same input and output directories. Use a unique `output_path` for
 each request; generation requests are not idempotent.
+
+### NUMA memory placement
+
+`nginx_serve.sh` defaults to `NUMA_INTERLEAVE=1`. It probes
+`numactl --interleave=all true` before starting workers, then launches each
+Python worker or `torchrun` agent under `numactl --interleave=all`. All CP ranks
+inherit the policy before loading models and creating shared weights. Pages
+are allocated across all NUMA memory nodes allowed by the process's cpuset;
+CPU affinity is unchanged.
+
+For eight independent single-GPU workers, use a CP1 profile matching the
+request shape and launch:
+
+```bash
+NUMA_INTERLEAVE=1 \
+NUM_WORKERS=8 \
+CONTEXT_PARALLEL_SIZE=1 \
+bash "$EX/nginx_serve.sh"
+```
+
+The explicit `NUMA_INTERLEAVE=1` is optional. If `numactl` is missing or its
+policy probe fails, the launcher exits before starting any workers. Install
+`numactl` and, with Docker's default security configuration, recreate the
+container with `--cap-add SYS_NICE`. To opt out, set `NUMA_INTERLEAVE=0` on the
+same command. This skips `numactl` and preserves the inherited memory policy,
+including any policy set by an outer launcher.
+
+Restart all workers with a fresh SHM namespace when changing the policy. The
+launcher generates a fresh UUID suffix for the default namespace on each launch.
+Applying interleaving to a process that attaches to existing SHM objects does
+not redistribute their existing pages; the policy must be in place when the
+shared weights are first allocated.
+
+On a system with eight A100 80 GB GPUs and eight NUMA nodes, eight CP1
+workers with SHM and text offload produced these median request times at
+1280×704, after warmup and three batches of eight concurrent requests:
+
+| Output | SHM without interleaving | SHM with interleaving |
+| --- | ---: | ---: |
+| 49 frames, 24 fps | 61.10 s | 35.53 s |
+| 449 frames, 15 fps | 298.22 s | 297.69 s |
+
+Interleaving spread the shared weights across the memory nodes, reducing the
+short-video latency by about 42%; the long-video timing was effectively
+unchanged. These were separate launches using the same profile within each
+comparison, on revision `10dab4d3` with the PyTorch 26.04 container. The
+non-interleaved controls were collected earlier, so small differences include
+run-to-run variability.
+
+To verify placement after warmup, inspect a Python worker or CP rank PID
+inside the container:
+
+```bash
+WORKER_PID=12345  # Replace with an actual Python worker or CP rank PID.
+grep 'file=/dev/shm/' "/proc/$WORKER_PID/numa_maps"
+```
+
+For the large shared-weight mappings, expect an `interleave:` policy listing
+the allowed nodes (for example, `interleave:0-7`) and roughly equal page counts
+in their `N0=...`, `N1=...`, etc. fields. Inspect the worker itself: running
+`numactl --show` in a separate shell reports that shell's policy.
 
 ### Scripted NGINX workflow
 
@@ -506,8 +648,8 @@ EX=/my_home/flex-tensor/examples/ltx23/outpaint
 ```
 
 Place your letterboxed conditioning videos under `$INPUT_DIR`, or override
-`LETTERBOXED_VIDEO` when running `setup.sh`. The setup helper installs NGINX,
-creates or reuses the LTX-2 checkout and Python environment, downloads model
+`LETTERBOXED_VIDEO` when running `setup.sh`. The setup helper installs NGINX and
+`numactl`, creates or reuses the LTX-2 checkout and Python environment, downloads model
 snapshots into the configured Hugging Face cache, and writes the FlexTensor
 profile used by all replicas. It defaults to `OFFLOAD_TEXT=1`,
 `TEXT_MEM_FRACTION=0.05`, and `MAX_GPU_MEM_FRACTION=0.15` to preserve activation
@@ -515,9 +657,8 @@ headroom on A100 40 GB. The NGINX helper also defaults
 `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` so cached FlexTensor managers
 do not fragment the allocator before large VAE workspaces. Distributed helpers
 default `CONTROL_PLANE_TIMEOUT_SECONDS=30` and
-`TORCH_NCCL_ASYNC_ERROR_HANDLING=1` for bounded failure detection. The NGINX
-serving helper also defaults `TORCHRUN_MAX_RESTARTS=3`. Override these
-environment variables for larger GPUs or throughput experiments.
+`TORCH_NCCL_ASYNC_ERROR_HANDLING=1` for bounded failure detection. Override
+these environment variables for larger GPUs or throughput experiments.
 
 1. Prepare the container/workspace and profile the target resolution:
 
@@ -566,8 +707,28 @@ FRONTEND_PORT=8080 \
 bash /my_home/flex-tensor/examples/ltx23/outpaint/nginx_serve.sh
 ```
 
-The launcher waits for every replica leader to finish warmup and answer `GET /healthz`
-before starting NGINX. It writes worker logs to:
+The launcher defaults `SHM_WAIT_TIMEOUT=3600` and generates a POSIX-safe,
+run-scoped `SHM_NAMESPACE` from the user, front-end port, launcher PID, and a
+fresh random UUID. The random suffix prevents repeated container PIDs (such as
+PID 1) from reusing a previous launch's namespace.
+
+To override the generated value, set `SHM_NAMESPACE` to a fresh namespace for
+each independent launch. Never reuse a previous run's namespace, even after
+all its workers have exited: with `--ipc=host`, SHM left by a killed run can
+survive the container, and reusing its namespace can silently attach old
+weights. A fresh namespace prevents that attachment; it does not reclaim SHM
+left by the previous run.
+
+The launcher sets the per-worker open-file soft limit to
+`SHM_NOFILE_SOFT_LIMIT=4096` before launching workers and fails early when the
+hard limit is lower. Set the container's `--ulimit nofile=4096:4096` (or the
+service's `LimitNOFILE`) in that case. For profiles requiring more descriptors,
+increase `SHM_NOFILE_SOFT_LIMIT` and the container or service hard limit together
+based on the measured requirement of the selected model and profile.
+
+The same run namespace is passed to every rank in every CP replica. The
+launcher waits for every replica leader to finish warmup and answer
+`GET /healthz` before starting NGINX. It writes worker logs to:
 
 ```text
 $OUTPUT_DIR/serve_cp<CP_SIZE>_replica<INDEX>_port<PORT>.log

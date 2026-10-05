@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # KeepAlive uses separate SHM segments managed by FlexibleSharedMemory.
 _COORD_BLOCK_SIZE = 256  # bytes — header + room for future fields
 _LIVENESS_POLL_INTERVAL_SECONDS = 0.25
+DEFAULT_KEEP_ALIVE_SECONDS = 30.0
 
 
 class ShmCoordinatorError(RuntimeError):
@@ -83,7 +84,7 @@ class ShmCoordinator:
         keep_alive_seconds: Timeout for participant-heartbeat liveness detection.
     """
 
-    def __init__(self, namespace: str, keep_alive_seconds: int | float = 30) -> None:
+    def __init__(self, namespace: str, keep_alive_seconds: int | float = DEFAULT_KEEP_ALIVE_SECONDS) -> None:
         self.namespace = namespace
         self._coord_shm: FlexibleSharedMemory | None = None
         self._profile_shm: FlexibleSharedMemory | None = None

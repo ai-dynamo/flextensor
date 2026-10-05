@@ -19,6 +19,7 @@ import os
 import re
 import sys
 import threading
+import time
 from collections import Counter
 from collections.abc import Callable, Iterable  # noqa: TC003 - beartype resolves public annotations at runtime.
 from dataclasses import dataclass, field
@@ -178,6 +179,33 @@ class SharedOffloadSession:
             )
         digest = hashlib.sha256(f"{self.namespace}\0{name}".encode()).hexdigest()[:12]
         return f"ft_{digest}"
+
+    @staticmethod
+    def cleanup_namespace(namespace: str, *, manager_names: Iterable[str], timeout: Any = 60.0) -> None:
+        """Remove an abandoned run's known managers without loading models.
+
+        Stop all workers and prevent new joins before calling. Run in their IPC
+        namespace with the same lock directory (TMPDIR). Fresh heartbeats block
+        cleanup; killed workers' leases expire after 30 seconds. No PID probing,
+        CUDA initialization, model loading, or replacement generation is used.
+
+        ``timeout`` bounds waiting across all managers; zero makes one immediate
+        attempt per manager. Missing generations are a no-op. Unknown/malformed
+        metadata fails closed; earlier managers may already have been removed,
+        so retrying after an error is safe. Stable setup-lock files are retained.
+        """
+        namespace, timeout = _normalize_shared_offload_options(namespace, timeout)
+        session = SharedOffloadSession(namespace)
+        from flextensor.shm.cleanup import cleanup_manager_namespace
+
+        if isinstance(manager_names, str):
+            raise ValueError("manager_names must be an iterable of manager names, not a string")
+        names = [session.namespace_for(name) for name in manager_names]
+        if not names:
+            raise ValueError("manager_names must not be empty")
+        deadline = time.monotonic() + timeout
+        for name in dict.fromkeys(names):
+            cleanup_manager_namespace(name, deadline=deadline)
 
     def offload_from_profile(  # noqa: C901 - keep shared transaction and error handling together.
         self,

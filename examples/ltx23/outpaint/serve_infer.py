@@ -31,6 +31,7 @@ from context_parallel import (
 )
 from ltx_core.components.noisers import GaussianNoiser
 from ltx_core.loader import LTXV_LORA_COMFY_RENAMING_MAP, LoraPathStrengthAndSDOps
+from ltx_core.model.transformer import X0Model
 from ltx_core.model.video_vae import TilingConfig, get_video_chunks_number
 from ltx_core.types import Audio, VideoPixelShape
 from ltx_pipelines.ic_lora import ICLoraPipeline
@@ -96,6 +97,33 @@ def positive_int(value: str) -> int:
     return parsed
 
 
+def build_meta_model(builder: Any, *, dtype: Any = None, wrapper_type: type | None = None) -> Any:
+    """Build an unweighted model through the official LTX builder protocol."""
+    config = builder.model_config()
+    model = builder.meta_model(config, builder.module_ops)
+    if dtype is not None:
+        # LTX's full builder casts checkpoint tensors while loading them, then
+        # moves the completed module without a blanket dtype conversion.
+        # Constructor-owned tensors that explicitly bypass the surrounding
+        # meta-device context (for example Gemma's float32 ``embed_scale``
+        # buffer) therefore retain their original dtype. Cast only meta
+        # placeholders here so follower skeletons reproduce that behavior.
+        if isinstance(model, torch.nn.Module):
+
+            def cast_checkpoint_placeholder(tensor: torch.Tensor) -> torch.Tensor:
+                if tensor.device.type == "meta" and (tensor.is_floating_point() or tensor.is_complex()):
+                    return tensor.to(dtype=dtype)
+                return tensor
+
+            model = model._apply(cast_checkpoint_placeholder)  # noqa: SLF001 - mirrors torch.nn.Module.to.
+        else:
+            # Keep the helper usable with builder-compatible test doubles.
+            model = model.to(dtype=dtype)
+    if wrapper_type is not None:
+        model = wrapper_type(model)
+    return model.eval()
+
+
 class RequestTransformerCache:
     """Cache stage transformers (and optionally the Gemma text encoder), each behind its own FlexTensor manager."""
 
@@ -107,6 +135,7 @@ class RequestTransformerCache:
         *,
         context_parallel: ContextParallelRuntime,
         text_config: OffloadConfig | None = None,
+        shared_session: flextensor.SharedOffloadSession | None = None,
     ) -> None:
         self.config = config
         self.context_parallel = context_parallel
@@ -114,6 +143,7 @@ class RequestTransformerCache:
         self.offload_text = text_config is not None
         self.profile_dir = profile_dir
         self.from_profile = from_profile
+        self.shared_session = shared_session
         self.cache: dict[int, torch.nn.Module] = {}
         self.text_model: torch.nn.Module | None = None
         self.stage_index = 0
@@ -176,18 +206,36 @@ class RequestTransformerCache:
 
         def patched_text_encoder_ctx(pe_self: PromptEncoder):
             if cache.text_model is None:
-                LOGGER.info("Building text encoder (CPU) for FlexTensor manager %s", TEXT_MANAGER_NAME)
-                cpu_encoder = pe_self._text_encoder_builder.build(  # noqa: SLF001
-                    device=torch.device("cpu"),
-                    dtype=pe_self._dtype,  # noqa: SLF001
-                ).eval()
                 LOGGER.info("Text encoder offload include_patterns: %s", cache.text_config.include_patterns)
 
                 text_profile_dir = cache.profile_dir / "text"
-                if cache.from_profile:
+
+                def full_builder() -> torch.nn.Module:
+                    LOGGER.info("Building text encoder (CPU) for FlexTensor manager %s", TEXT_MANAGER_NAME)
+                    return pe_self._text_encoder_builder.build(  # noqa: SLF001 - example hooks into LTX lifecycle.
+                        device=torch.device("cpu"),
+                        dtype=pe_self._dtype,  # noqa: SLF001
+                    ).eval()
+
+                def meta_builder() -> torch.nn.Module:
+                    return build_meta_model(
+                        pe_self._text_encoder_builder,  # noqa: SLF001
+                        dtype=pe_self._dtype,  # noqa: SLF001
+                    )
+
+                if cache.shared_session is not None:
+                    cache.text_model = cache.shared_session.offload_from_profile(
+                        str(text_profile_dir),
+                        config=cache.text_config,
+                        name=TEXT_MANAGER_NAME,
+                        creator_model_factory=full_builder,
+                        follower_model_factory=meta_builder,
+                        materialize_device=pe_self._device,  # noqa: SLF001
+                    )
+                elif cache.from_profile:
                     LOGGER.info("Loading FlexTensor profile for %s from %s", TEXT_MANAGER_NAME, text_profile_dir)
                     cache.text_model = flextensor.offload_from_profile(
-                        cpu_encoder,
+                        full_builder(),
                         str(text_profile_dir),
                         config=cache.text_config,
                         name=TEXT_MANAGER_NAME,
@@ -195,7 +243,7 @@ class RequestTransformerCache:
                 else:
                     LOGGER.info("Profiling FlexTensor manager %s", TEXT_MANAGER_NAME)
                     cache.text_model = flextensor.offload(
-                        cpu_encoder,
+                        full_builder(),
                         config=cache.text_config,
                         name=TEXT_MANAGER_NAME,
                     )
@@ -212,9 +260,34 @@ class RequestTransformerCache:
         stage_profile_dir = self.stage_profile_dir(stage_index)
         build_kwargs = dict(kwargs)
         build_kwargs["device"] = torch.device("cpu")
-        LOGGER.info("Building stage%s CPU transformer", stage_index)
-        transformer = self.original_build(stage, **build_kwargs)
-        install_context_parallel(transformer, self.context_parallel)
+
+        def full_builder() -> torch.nn.Module:
+            LOGGER.info("Building stage%s CPU transformer", stage_index)
+            transformer = self.original_build(stage, **build_kwargs)
+            install_context_parallel(transformer, self.context_parallel)
+            return transformer
+
+        if self.shared_session is not None:
+
+            def meta_builder() -> torch.nn.Module:
+                transformer = build_meta_model(
+                    stage._transformer_builder,  # noqa: SLF001 - official DiffusionStage builder.
+                    dtype=stage._dtype,  # noqa: SLF001
+                    wrapper_type=X0Model,
+                )
+                install_context_parallel(transformer, self.context_parallel)
+                return transformer
+
+            return self.shared_session.offload_from_profile(
+                str(stage_profile_dir),
+                config=self.config,
+                name=manager_name,
+                creator_model_factory=full_builder,
+                follower_model_factory=meta_builder,
+                materialize_device=stage._device,  # noqa: SLF001
+            )
+
+        transformer = full_builder()
         if self.from_profile:
             LOGGER.info("Loading FlexTensor profile for %s from %s", manager_name, stage_profile_dir)
             return flextensor.offload_from_profile(
@@ -614,6 +687,7 @@ class OutpaintFlexTensorService:
         context_parallel: ContextParallelRuntime,
         *,
         from_profile: bool,
+        shared_session: flextensor.SharedOffloadSession | None = None,
     ) -> None:
         self.args = args
         self.context_parallel = context_parallel
@@ -659,6 +733,7 @@ class OutpaintFlexTensorService:
             from_profile=from_profile,
             context_parallel=context_parallel,
             text_config=text_config,
+            shared_session=shared_session,
         )
         self.cache.install()
         self.request_lock = Lock()
@@ -999,48 +1074,59 @@ def serve(
     shutdown: ReplicaShutdownCoordinator,
     signal_handlers: ShutdownSignalHandlers,
 ) -> None:
-    service = OutpaintFlexTensorService(args, context_parallel, from_profile=True)
-    context_parallel.barrier()
-    if _leader_requested_shutdown(shutdown, signal_handlers, context_parallel):
-        LOGGER.info("Shutdown requested during service construction")
-        return
-    if not context_parallel.is_leader:
-        _run_context_parallel_follower(service, context_parallel)
-        return
-
-    server = ReplicaRequestServer(args.host, args.port, service, context_parallel, logger=LOGGER)
-    shutdown.attach_server(server)
-    if not shutdown.requested:
-        LOGGER.info("Starting warmup")
-        LOGGER.info(
-            "Warmup result:\n%s",
-            json.dumps(service.generate({"output_path": args.warmup_output_path}), indent=2),
+    session_context = (
+        flextensor.SharedOffloadSession(args.shm_namespace, wait_timeout=args.shm_wait_timeout)
+        if args.shm_namespace is not None
+        else contextlib.nullcontext(None)
+    )
+    with session_context as shared_session:
+        service = OutpaintFlexTensorService(
+            args,
+            context_parallel,
+            from_profile=True,
+            shared_session=shared_session,
         )
+        context_parallel.barrier()
+        if _leader_requested_shutdown(shutdown, signal_handlers, context_parallel):
+            LOGGER.info("Shutdown requested during service construction")
+            return
+        if not context_parallel.is_leader:
+            _run_context_parallel_follower(service, context_parallel)
+            return
 
-    http_loop_stopped = False
-    try:
+        server = ReplicaRequestServer(args.host, args.port, service, context_parallel, logger=LOGGER)
+        shutdown.attach_server(server)
         if not shutdown.requested:
+            LOGGER.info("Starting warmup")
             LOGGER.info(
-                "Serving on http://%s:%s (CP%s replica leader)",
-                args.host,
-                args.port,
-                context_parallel.size,
+                "Warmup result:\n%s",
+                json.dumps(service.generate({"output_path": args.warmup_output_path}), indent=2),
             )
-        server.serve_forever()
-        http_loop_stopped = True
-    finally:
-        if signal_handlers.received_signal is not None:
-            LOGGER.info(
-                "Received signal %s; completing coordinated replica shutdown",
-                signal_handlers.received_signal,
-            )
-        if context_parallel.enabled:
-            finalize_follower_shutdown(
-                context_parallel,
-                http_loop_stopped=http_loop_stopped,
-                request_in_flight=server.request_in_flight,
-                logger=LOGGER,
-            )
+
+        http_loop_stopped = False
+        try:
+            if not shutdown.requested:
+                LOGGER.info(
+                    "Serving on http://%s:%s (CP%s replica leader)",
+                    args.host,
+                    args.port,
+                    context_parallel.size,
+                )
+            server.serve_forever()
+            http_loop_stopped = True
+        finally:
+            if signal_handlers.received_signal is not None:
+                LOGGER.info(
+                    "Received signal %s; completing coordinated replica shutdown",
+                    signal_handlers.received_signal,
+                )
+            if context_parallel.enabled:
+                finalize_follower_shutdown(
+                    context_parallel,
+                    http_loop_stopped=http_loop_stopped,
+                    request_in_flight=server.request_in_flight,
+                    logger=LOGGER,
+                )
 
 
 def parse_args() -> argparse.Namespace:
@@ -1119,8 +1205,31 @@ def parse_args() -> argparse.Namespace:
     server.add_argument("--host", default="127.0.0.1")
     server.add_argument("--port", type=int, default=8020)
     server.add_argument("--warmup-output-path", default="/workspace/outputs/ltx23_outpaint_warmup.mp4")
+    server.add_argument(
+        "--shm-namespace",
+        default=None,
+        help=(
+            "Namespace shared by all workers in one launch; use a fresh value for each launch. "
+            "Supplying it enables shared-memory weight sharing."
+        ),
+    )
+    server.add_argument(
+        "--shm-wait-timeout",
+        type=float,
+        default=3600.0,
+        help="Maximum seconds a follower waits for each manager creator; zero means no overall limit.",
+    )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.command == "serve" and args.shm_namespace is not None:
+        try:
+            flextensor.SharedOffloadSession.validate_options(
+                args.shm_namespace,
+                wait_timeout=args.shm_wait_timeout,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+    return args
 
 
 def resolve_model_artifacts(

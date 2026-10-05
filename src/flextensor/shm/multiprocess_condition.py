@@ -113,7 +113,10 @@ class SharedMultiString:
         if self.shm is None:
             msg = "SharedMultiString is closed"
             raise ValueError(msg)
-        return bool(struct.unpack("?", self.shm.buf[4:5])[0])  # type: ignore[index]
+        value = self.shm.buf[4]  # type: ignore[index]
+        if value not in (0, 1):
+            raise RuntimeError(f"Invalid shared string buffer ready flag: {value}")
+        return bool(value)
 
     def get_list(self) -> list[str]:
         """Return all strings in the buffer as a list."""
@@ -124,6 +127,8 @@ class SharedMultiString:
         # (don't use self.pos as it may be stale in multiprocess scenarios)
         pos = struct.unpack("I", self.shm.buf[0:4])[0]  # type: ignore[index]
         # Filter out empty strings that can result from splitting
+        if not HEADER_SIZE <= pos <= self.shm.size:
+            raise RuntimeError(f"Invalid shared string buffer length: {pos}")
         s = bytes(self.shm.buf[HEADER_SIZE:pos]).decode("utf-8")  # type: ignore[index]
         return s.split("|") if s else []
 
