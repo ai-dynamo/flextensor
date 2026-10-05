@@ -295,6 +295,8 @@ class FlexTensorOffloadWorker(Worker):
     Applies tensor offloading after model loading when FT_ENABLED=1.
     """
 
+    _ft_compile_gated_modules: list[Any] | None
+
     def load_model(self) -> None:
         """Load model with optional FlexTensor offloading."""
         # Create offload config using the device set by init_device()
@@ -453,6 +455,7 @@ class FlexTensorOffloadWorker(Worker):
         root = getattr(om, "model", None)
         if root is None:
             return
+        gated: list[Any] | None
         if not enabled:
             existing = getattr(self, "_ft_compile_gated_modules", None)
             if existing is not None:

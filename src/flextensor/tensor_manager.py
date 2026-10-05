@@ -4,10 +4,10 @@ import copy
 import logging
 import types
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, get_args
+from typing import TYPE_CHECKING, Any, cast, get_args
 
 import psutil
 import torch
@@ -169,31 +169,34 @@ def _compute_resource_release_strategy(
 
 
 class ModelDict:
-    def __init__(self, tensor_manager=None, model=None):
-        self.key_to_id_map = {}
-        for key, tensor in model.items():
+    def __init__(
+        self, tensor_manager: "TensorManager | None" = None, model: Mapping[str, object] | None = None
+    ) -> None:
+        self.key_to_id_map: dict[str, int] = {}
+        self.tensor_manager = tensor_manager
+        self.model = cast("Mapping[str, object]", model)
+
+        for key, tensor in self.model.items():
             tensor_id = id(tensor)
             self.key_to_id_map[key] = tensor_id
 
-        self.tensor_manager = tensor_manager
-        self.model = model
-
-    def __getitem__(self, key):
+    def __getitem__(self, key: str) -> object:
         tensor_id = self.key_to_id_map[key]
 
         tensor = self.model[key]
 
-        if self.tensor_manager.is_traced_by_id(tensor_id):
-            new_tensor = self.tensor_manager.tensor_layer_loader.get(tensor_id)
+        tensor_manager = cast("TensorManager", self.tensor_manager)
+        if tensor_manager.is_traced_by_id(tensor_id):
+            new_tensor = tensor_manager.tensor_layer_loader.get(tensor_id)
             if new_tensor is not None:
                 tensor = new_tensor
         return tensor
 
-    def items(self):
+    def items(self) -> Any:
         return self.model.items()
 
 
-def _rebind_bound_methods(module_copy, original_module):
+def _rebind_bound_methods(module_copy: torch.nn.Module, original_module: torch.nn.Module) -> None:
     """Rebind any bound methods in __dict__ that are still bound to the original module."""
     for name, value in list(module_copy.__dict__.items()):
         if isinstance(value, types.MethodType) and value.__self__ is original_module:
@@ -201,7 +204,12 @@ def _rebind_bound_methods(module_copy, original_module):
             module_copy.__dict__[name] = rebound_method
 
 
-def _apply_missing_field(tensor_ref, new_tensor, missing_field, tensor_manager):
+def _apply_missing_field(
+    tensor_ref: torch.Tensor,
+    new_tensor: torch.Tensor,
+    missing_field: str,
+    tensor_manager: "TensorManager",
+) -> None:
     """Apply a missing field from tensor_ref to new_tensor, handling device placement."""
     field = getattr(tensor_ref, missing_field)
     if isinstance(field, torch.Tensor):
@@ -215,11 +223,15 @@ def _apply_missing_field(tensor_ref, new_tensor, missing_field, tensor_manager):
         setattr(new_tensor, missing_field, field)
 
 
-def _make_tensor_getter(tensor_ref, tensor_manager, missing_fields):
+def _make_tensor_getter(
+    tensor_ref: Any,
+    tensor_manager: Any,
+    missing_fields: list[str],
+) -> Any:
     """Create a property getter for a tensor that handles offloading."""
     tensor_id = id(tensor_ref)
 
-    def getter(_self):
+    def getter(_self: Any) -> Any:
         tensor = tensor_ref
         if tensor_manager.is_traced_by_id(tensor_id):
             new_tensor = tensor_manager.tensor_layer_loader.get(tensor_id)
@@ -341,7 +353,10 @@ def prepare_model(
     return _prepare_module(model)
 
 
-def compute_layer_statistics(iterative_layer_statistics, tensor_statistics_map) -> list[LayerStatistics]:
+def compute_layer_statistics(
+    iterative_layer_statistics: Any,
+    tensor_statistics_map: dict[int, TensorStatistics],
+) -> list[LayerStatistics]:
     """Convert iterative (collection-time) stats to strict (strategy-time) stats.
 
     Entries whose ``duration`` is ``None`` — i.e. labels that were discovered
@@ -395,7 +410,7 @@ class TensorManager:
         remove_layers_operations: list[dict[str, Any]] | None = None,
         blocks: int = 4,
         move_top_level_buffers_to_gpu: bool = True,
-        use_shm=False,
+        use_shm: bool = False,
         include_patterns: list[str] | None = None,
         exclude_patterns: list[str] | None = None,
         enable_diagnostics: bool = False,
@@ -555,7 +570,7 @@ class TensorManager:
         self.min_compute_transfer_gap = _compute_transfer_gap
         self.use_trace_tensor = _use_trace_tensor
         if _use_trace_tensor:
-            self.is_traced = self.is_traced_trace_tensor
+            self.is_traced = self.is_traced_trace_tensor  # type: ignore[method-assign]
 
         self._validate_profile_mode_combination()
 
@@ -689,16 +704,16 @@ class TensorManager:
             return False
         return self.pinned_memory
 
-    def build_parameters_mapping(self, model):
+    def build_parameters_mapping(self, model: Any) -> None:
         self.tensor_id_to_name_map = {}
         if isinstance(model, torch.nn.Module):
             for name, tensor in model.named_parameters():
                 self.tensor_id_to_name_map[id(tensor)] = name
         elif isinstance(model, dict):
-            for name, tensor in model.items():
-                self.tensor_id_to_name_map[id(tensor)] = name
+            for name, t in model.items():
+                self.tensor_id_to_name_map[id(t)] = name
 
-    def _move_non_offloaded_tensors_to_gpu(self, *, extra_pin_ids: set[int] | None = None):
+    def _move_non_offloaded_tensors_to_gpu(self, *, extra_pin_ids: set[int] | None = None) -> None:
         """Move non-offloaded tensors to GPU and remove them from offload tracking.
 
         Identifies tensors not matching include_patterns or matching
@@ -729,7 +744,6 @@ class TensorManager:
         """
         if self._non_offloaded_tensors_moved:
             return
-
         non_offloaded_ids = get_non_offloaded_tensor_ids(
             self.model,
             self.tensors_map,
@@ -764,7 +778,7 @@ class TensorManager:
         self._non_offloaded_tensors_moved = True
         self.tensors_map = types.MappingProxyType(self.tensors_map)
 
-    def set_model(self, model):
+    def set_model(self, model: torch.nn.Module | dict[str, object] | ModelDict) -> None:
         self.model = model
         # A new model invalidates the once-per-model preprocessing guard.
         # ``_move_non_offloaded_tensors_to_gpu`` is idempotent *per model*; left
@@ -810,20 +824,21 @@ class TensorManager:
         """
         self.skip_discovery_requested = skip_discovery
 
-    def initialize_warmup(self):
+    def initialize_warmup(self) -> Any:
+        model = self.model
         # Only an externally restored profile short-circuits to inference. A
         # previous live cycle also leaves ``tensor_manager_state`` populated,
         # and branching on that would make a second ``offload()`` on this
         # manager serve the *previous* model's plan and tensor IDs.
         if self._state_restored_from_profile:
             self.prepare_infer_load_mode()
-            final_model = self.prepare_final_model(self.model)  # patch model
+            final_model = self.prepare_final_model(model)  # patch model
             self.model = final_model
             return self.model
 
         if not self.use_trace_tensor:  # TODO: add support for trace tensor
             preprocess_model(
-                self.model,
+                model,
                 self,
                 self.device_gpu,
                 pin_memory=self.should_pin_in_preprocess(),
@@ -831,9 +846,9 @@ class TensorManager:
                 move_top_level_buffers_to_gpu=self.move_top_level_buffers_to_gpu,
             )
             cross_ref_pin_ids = detect_cross_module_reads(
-                self.model,
+                cast("torch.nn.Module | dict[Any, Any] | None", model),
                 get_offload_module_tensor_ids(
-                    self.model,
+                    model,
                     self.tensors_map,
                     include_patterns=self.include_patterns,
                     exclude_patterns=self.exclude_patterns,
@@ -852,11 +867,13 @@ class TensorManager:
                     format_tensor_id_hint(cross_ref_pin_ids, self.tensor_id_to_name_map),
                 )
             self._move_non_offloaded_tensors_to_gpu(extra_pin_ids=cross_ref_pin_ids)
-        self.prepare_model_ids(self.model)  # TODO: Move to preprocess_model after remove benchmark context
+        self.prepare_model_ids(model)  # TODO: Move to preprocess_model after remove benchmark context
 
         self.prepare_warmup_mode()
 
-        if self.skip_discovery_requested and has_offload_modules(self.model):
+        if self.skip_discovery_requested and has_offload_modules(
+            cast("torch.nn.Module | dict[Any, Any] | None", model)
+        ):
             self.layer_stats = self._build_layer_stats_from_forward_patching()
             self._layer_stats_seeded_statically = True
             for layer_stat in self.layer_stats:
@@ -864,7 +881,7 @@ class TensorManager:
 
         return self.model
 
-    def initialize_profile(self):
+    def initialize_profile(self) -> Any:
         if self._state_restored_from_profile:
             return self.model
         self._move_non_offloaded_tensors_to_gpu()
@@ -884,7 +901,7 @@ class TensorManager:
             self.prepare_profile_mode()
         return profile_model
 
-    def initialize_inference(self):
+    def initialize_inference(self) -> Any:
         if self._state_restored_from_profile:
             final_model = self.model
             self.model = None
@@ -898,9 +915,9 @@ class TensorManager:
         return final_model
 
     # TODO: Fix me, remove!
-    def prepare_model_ids(self, model):
+    def prepare_model_ids(self, model: torch.nn.Module | dict[str, object] | ModelDict) -> None:
         tensors_ids = set()
-        iterator = None
+        iterator: Any = None
         if isinstance(model, torch.nn.Module):
             iterator = model.named_parameters()
         elif isinstance(model, dict):
@@ -910,7 +927,7 @@ class TensorManager:
             tensors_ids.add(id(tensor))
             self.set_model_ids(tensors_ids)
 
-    def set_model_ids(self, tensors_ids):
+    def set_model_ids(self, tensors_ids: set[int]) -> None:
         self.model_ids = tensors_ids
 
     def _build_layer_stats_from_forward_patching(self) -> list[IterativeLayerStatistics]:
@@ -971,7 +988,7 @@ class TensorManager:
 
         return stats
 
-    def prepare_warmup_mode(self):
+    def prepare_warmup_mode(self) -> None:
         self.layer_statistics_collector = IterativeLayerStatisticsCollector()
         # Fresh discovery cycle -> the next profile setup must rebuild stats.
         # Drop the previous cycle's list too: a second ``offload()`` reuses this
@@ -1037,7 +1054,7 @@ class TensorManager:
             id_to_name_map=self.tensor_id_to_name_map,
         )
 
-    def prepare_profile_direct_mode_model(self, model):
+    def prepare_profile_direct_mode_model(self, model: Any) -> Any:
         """Return the profile-phase model for ``profile_mode`` in {``view``, ``getter``}.
 
         Must be called before :meth:`prepare_profile_direct_mode`. View mode
@@ -1102,7 +1119,7 @@ class TensorManager:
         self._layer_stats_computed = True
         return self.layer_stats or []
 
-    def _prepare_view_profile_model(self, profile_model):
+    def _prepare_view_profile_model(self, profile_model: Any) -> Any:
         """Build the view-mode profile controller and patch ``profile_model`` with its views.
 
         The controller is installed as ``self.tensor_layer_loader`` immediately
@@ -1138,14 +1155,14 @@ class TensorManager:
         # Pass the patched model so teardown can restore dict-container entries.
         profile_model = self._profile_view_model if self._profile_view_model is not None else self.model
         try:
-            controller.teardown(profile_model, self.tensors_map)
+            controller.teardown(cast("torch.nn.Module | dict[str, object] | None", profile_model), self.tensors_map)
         finally:
             # Drop the refs unconditionally; the block is already released by
             # ``teardown``'s own finally.
             self._profile_view_model = None
             self.tensor_layer_loader = None
 
-    def prepare_profile_direct_mode(self):
+    def prepare_profile_direct_mode(self) -> None:
         """Wire the profile-phase trap class for ``profile_mode`` in {``view``, ``getter``}.
 
         Must run after :meth:`prepare_profile_direct_mode_model`. View mode
@@ -1172,7 +1189,7 @@ class TensorManager:
 
         self.trap_class = TrapDirect
 
-    def prepare_profile_mode(self):
+    def prepare_profile_mode(self) -> None:
         """Wire the profile-phase trap for ``profile_mode='torch_function'``.
 
         Single-call setup (the ``torch_function`` path doesn't patch the model).
@@ -1275,7 +1292,7 @@ class TensorManager:
             type(self.tensor_manager_load_strategy).__name__,
         )
 
-    def prepare_infer_load_mode(self):
+    def prepare_infer_load_mode(self) -> None:
         """Prepare inference mode from saved state.
 
         This method is called when tensor_manager_state has been loaded from a saved profile.
@@ -1391,7 +1408,7 @@ class TensorManager:
 
         # Apply transfer rearrangement only during fresh computation (prepare_state=True)
         # When loading from state, rearrangements were already applied
-        tensor_loader_class = PreallocatedBatchTransferTensorLoader
+        tensor_loader_class: Any = PreallocatedBatchTransferTensorLoader
         if self.rearrange_transfers:
             tensor_loader_class = PreallocatedBatchTransferTensorLoaderReordered
             if prepare_state:
@@ -1510,7 +1527,7 @@ class TensorManager:
 
         # Apply transfer rearrangement only during fresh computation (prepare_state=True)
         # When loading from state, rearrangements were already applied
-        tensor_loader_class = PreallocatedBatchTransferTensorLoader
+        tensor_loader_class: Any = PreallocatedBatchTransferTensorLoader
         if self.rearrange_transfers:
             tensor_loader_class = PreallocatedBatchTransferTensorLoaderReordered
             if prepare_state:
@@ -1641,7 +1658,7 @@ class TensorManager:
             format_tensor_id_hint(self.observed_cross_refs, self.tensor_id_to_name_map),
         )
 
-    def prepare_infer_mode(self):
+    def prepare_infer_mode(self) -> None:
         """Prepare inference mode from fresh profiling data.
 
         This method is called after profiling to compute the load strategy and create
@@ -1769,12 +1786,15 @@ class TensorManager:
         else:
             if self.block_data is None:
                 raise ValueError("Block data not available. Strategy must compute block_data for block loaders.")
+            block_sizes = self.block_data.block_sizes
+            if isinstance(block_sizes, list):
+                block_sizes = dict(enumerate(block_sizes))
             loader_data = LoaderInputData(
                 allocation_ordered=self.block_data.allocation_ordered,
                 label_to_block_id=self.block_data.label_to_block_id,
                 transfer_to_compute_map=self.block_data.transfer_to_compute_map,
                 label_to_size_map=self.block_data.label_to_size_map,
-                block_sizes=self.block_data.block_sizes,
+                block_sizes=block_sizes,
             )
 
         self._create_loader(loader_data, prepare_state=True, release_tensor_memory=release_tensor_memory)
@@ -1817,7 +1837,7 @@ class TensorManager:
     def replan_from_compiled_durations(
         self,
         durations_by_label: dict[str, float],
-        model,
+        model: Any,
     ) -> bool:
         """Recompute offload strategy from compiled per-layer timings and rebuild the loader.
 
@@ -1904,7 +1924,7 @@ class TensorManager:
             torch.cuda.empty_cache()
         return True
 
-    def _release_loader_blocks(self, loader) -> None:
+    def _release_loader_blocks(self, loader: Any) -> None:
         """Release a loader's pinned CPU blocks and GPU allocations.
 
         Re-plan helper: frees loader-1 before rebuild. Best-effort — failures
@@ -1930,17 +1950,17 @@ class TensorManager:
 
     def prepare_tensor_manager_state(
         self,
-        loader_type,
-        allocation_ordered,
-        label_to_size_map,
-        block_sizes,
-        load_strategy,
-        release_strategy,
-        label_to_block_id,
-        stats,
-        transfer_to_compute_map,
-        shm_block_name_map,
-    ):
+        loader_type: str,
+        allocation_ordered: dict[int, list[str]],
+        label_to_size_map: dict[str, int],
+        block_sizes: dict[int, int],
+        load_strategy: dict[str, list[TensorStatistics]],
+        release_strategy: dict[str, list[TensorStatistics]],
+        label_to_block_id: dict[str, int],
+        stats: list[LayerStatistics],
+        transfer_to_compute_map: dict[str, str],
+        shm_block_name_map: dict[str, str] | None,
+    ) -> TensorManagerState:
         """Delegate to TensorManagerStateHandler for state preparation."""
         state_handler = TensorManagerStateHandler(self)
         return state_handler.prepare_state(
@@ -1956,10 +1976,18 @@ class TensorManager:
             shm_block_name_map=shm_block_name_map,
         )
 
-    def restore_state(self, model: Any, state: Any, *, load_from_shm: bool = False) -> None:
+    def restore_state(
+        self,
+        model: torch.nn.Module | dict[str, object] | ModelDict,
+        state: TensorManagerState,
+        *,
+        load_from_shm: bool = False,
+    ) -> None:
         """Delegate to TensorManagerStateHandler for state restoration."""
         state_handler = TensorManagerStateHandler(self)
-        state_handler.restore_state(model, state, load_from_shm=load_from_shm)
+        state_handler.restore_state(
+            cast("torch.nn.Module | dict[str, object]", model), state, load_from_shm=load_from_shm
+        )
         if isinstance(model, torch.nn.Module):
             # ``set_model()`` intentionally builds the parameters-only mapping
             # used by fresh profiling. Restored-state export happens after
@@ -2096,7 +2124,7 @@ class TensorManager:
         """
         TensorManagerStateHandler(self).restore_state(model, state, preprocess_model_state=False)
 
-    def _save_state_to_file(self, file_path):
+    def _save_state_to_file(self, file_path: Path | str) -> None:
         """Internal: Save state to a specific file path."""
         if self.tensor_manager_state is None:
             raise RuntimeError(
@@ -2105,7 +2133,7 @@ class TensorManager:
             )
         TensorManagerStateHandler.save_to_file(file_path, self.tensor_manager_state)
 
-    def _load_state_from_file(self, file_path):
+    def _load_state_from_file(self, file_path: Path | str) -> TensorManagerState:
         """Internal: Load state from a specific file path."""
         return TensorManagerStateHandler.load_from_file(file_path)
 
@@ -2254,7 +2282,7 @@ class TensorManager:
         if not self.is_profiling_suspended():
             self.layer_statistics_collector.add_duration(label, duration_ms)
 
-    def trap(self, name):
+    def trap(self, name: str) -> Any:
         return self.trap_class(self, name, self.device_gpu)
 
     def is_current_trap_tainted(self) -> bool:
@@ -2285,7 +2313,7 @@ class TensorManager:
             return
         self._active_trap_tainted = True
 
-    def release_memory(self):
+    def release_memory(self) -> None:
         if self.tensor_layer_loader is not None:
             self.tensor_layer_loader.release_memory()
 
@@ -2315,9 +2343,10 @@ class TensorManager:
                     # can drop its references without a second full weight copy.
                     # SHM blocks are explicitly unmapped by ``block.release()``
                     # and therefore still need independent storage.
-                    cpu_block = controller.block_map_cpu[label]
                     requires_copy = (
-                        isinstance(controller, AllocationBlockController) and cpu_block.shm_block is not None
+                        controller.block_map_cpu[label].shm_block is not None
+                        if isinstance(controller, AllocationBlockController)
+                        else False
                     )
                     restored_data = (
                         source_view.clone(memory_format=torch.preserve_format) if requires_copy else source_view
@@ -2462,16 +2491,16 @@ class TensorManager:
             collector.flush_pending_eager_pass()
         return self._drain_offload_timing_measure()
 
-    def is_traced_trace_tensor(self, tensor):
+    def is_traced_trace_tensor(self, tensor: Any) -> bool:
         return isinstance(tensor, TraceTensor)
 
-    def is_traced(self, tensor):
+    def is_traced(self, tensor: Any) -> bool:
         if not isinstance(tensor, torch.Tensor):
             return False
         tensor_id = id(tensor)
         return tensor_id in self.traced_tensors
 
-    def is_traced_by_id(self, tensor_id):
+    def is_traced_by_id(self, tensor_id: int) -> bool:
         return tensor_id in self.traced_tensors
 
     # Return type is `Any` instead of `Iterator[TensorBenchmarkMode]` or `Generator[...]` due to
@@ -2515,7 +2544,11 @@ class TensorManager:
                 for tensor_id, _tensor in self.tensors_map.items():
                     self.traced_tensors.add(tensor_id)
 
-    def _prepare_view_model_from_id_to_view_map(self, model, tensor_id_to_view_map):
+    def _prepare_view_model_from_id_to_view_map(
+        self,
+        model: torch.nn.Module | dict[str, object] | ModelDict | None,
+        tensor_id_to_view_map: dict[int, torch.Tensor],
+    ) -> None:
         mapped_meta_tensor_ids = {
             tensor_id
             for tensor_id in tensor_id_to_view_map
@@ -2538,7 +2571,7 @@ class TensorManager:
 
         if mapped_meta_tensor_ids:
             if isinstance(model, torch.nn.Module):
-                live_tensors = dict(model.named_parameters())
+                live_tensors: dict[str, object] = dict(model.named_parameters())
             elif isinstance(model, dict):
                 live_tensors = model
             else:
@@ -2560,7 +2593,9 @@ class TensorManager:
                 refreshed_tensors_map[tensor_id] = replacement
             self.tensors_map = refreshed_tensors_map
 
-    def prepare_view_model(self, model):
+    def prepare_view_model(
+        self, model: torch.nn.Module | dict[str, object] | ModelDict | None
+    ) -> torch.nn.Module | dict[str, object] | ModelDict | None:
         new_model = model
         if self.loader_type in {"allocation_block_transfer", "raw_block_transfer"}:
             block_controller = self.tensor_layer_loader.allocation_controller

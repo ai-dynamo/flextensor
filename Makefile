@@ -98,7 +98,7 @@ test-unit:
 	pytest -sv tests/unit --cov=flextensor --cov-report=html --cov-report=xml --cov-report=term-missing
 
 mypy:
-	mypy src/flextensor
+	uv run --frozen --group test mypy src/flextensor
 
 lint-imports:
 	PYTHONPATH=src uv run --no-project --with import-linter==2.12 lint-imports --config pyproject.toml --no-cache

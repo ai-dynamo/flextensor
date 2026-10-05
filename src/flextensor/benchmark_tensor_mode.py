@@ -92,8 +92,8 @@ class BenchmarkReplace(TensorBenchmarkMode):
         self.warmup_iterations = 5
         self.device_gpu = device_gpu
         self.pinned_memory = pinned_memory
-        self.tensor_statistics_map = {}
-        self.tensors_map = {}
+        self.tensor_statistics_map: dict[int, TensorStatistics] = {}
+        self.tensors_map: dict[int, Any] = {}
         self.pinned_memory_limit_mb = pinned_memory_limit_mb
         self.host_pinner = host_pinner
 
@@ -111,7 +111,7 @@ class BenchmarkReplace(TensorBenchmarkMode):
             "tensors_map": self.tensors_map,
         }
 
-    def __torch_function__(
+    def __torch_function__(  # type: ignore[override]
         self,
         func: Callable[..., Any],
         _types: tuple[type, ...],
@@ -212,8 +212,8 @@ class PreloadToDevice(TensorBenchmarkMode):
         self.device_gpu = device_gpu
         self.pinned_memory = pinned_memory  # Stored for interface compatibility but not used
         self.iterations = iterations  # Stored for interface compatibility but not used
-        self.tensor_statistics_map = {}
-        self.tensors_map = {}
+        self.tensor_statistics_map: dict[int, TensorStatistics] = {}
+        self.tensors_map: dict[int, Any] = {}
         self.pinned_memory_limit_mb = pinned_memory_limit_mb
         self.host_pinner = host_pinner  # accepted for ABC compatibility, not used
 
@@ -231,7 +231,7 @@ class PreloadToDevice(TensorBenchmarkMode):
             "tensors_map": self.tensors_map,
         }
 
-    def __torch_function__(
+    def __torch_function__(  # type: ignore[override]
         self,
         func: Callable[..., Any],
         _types: tuple[type, ...],
@@ -283,8 +283,8 @@ class NoOpBenchmark(TensorBenchmarkMode):
         self.device_gpu = device_gpu
         self.pinned_memory = pinned_memory  # Stored for interface compatibility but not used
         self.iterations = iterations  # Stored for interface compatibility but not used
-        self.tensor_statistics_map = {}
-        self.tensors_map = {}
+        self.tensor_statistics_map: dict[int, TensorStatistics] = {}
+        self.tensors_map: dict[int, Any] = {}
         self.pinned_memory_limit_mb = pinned_memory_limit_mb
         self.host_pinner = host_pinner  # accepted for ABC compatibility, not used
 
@@ -302,7 +302,7 @@ class NoOpBenchmark(TensorBenchmarkMode):
             "tensors_map": self.tensors_map,
         }
 
-    def __torch_function__(
+    def __torch_function__(  # type: ignore[override]
         self,
         func: Callable[..., Any],
         _types: tuple[type, ...],

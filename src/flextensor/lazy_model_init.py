@@ -2,8 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any, cast
+
 import torch
 import torch.nn as nn
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from flextensor.tensor_manager import TensorManager  # noqa: TC001
 
@@ -117,10 +122,10 @@ class ModulePatcher:
         causing race conditions. Use only in single-threaded contexts.
     """
 
-    _original_register_buffer = None
-    _original_register_parameter = None
-    _param_device = None
-    _buffer_device = None
+    _original_register_buffer: Callable[..., Any] | None = None
+    _original_register_parameter: Callable[..., Any] | None = None
+    _param_device: str | None = None
+    _buffer_device: str | None = None
 
     @classmethod
     def patch(cls, param_device: str = "meta", buffer_device: str = "cuda") -> None:
@@ -134,28 +139,33 @@ class ModulePatcher:
             cls._original_register_parameter = nn.Module.register_parameter
 
         # Patch methods
-        nn.Module.register_buffer = cls._patched_register_buffer
-        nn.Module.register_parameter = cls._patched_register_parameter
+        nn.Module.register_buffer = cls._patched_register_buffer  # type: ignore[method-assign]
+        nn.Module.register_parameter = cls._patched_register_parameter  # type: ignore[method-assign]
 
     @classmethod
     def unpatch(cls) -> None:
         """Restore original methods"""
         if cls._original_register_buffer:
-            nn.Module.register_buffer = cls._original_register_buffer
-            nn.Module.register_parameter = cls._original_register_parameter
+            nn.Module.register_buffer = cls._original_register_buffer  # type: ignore[method-assign]
+            nn.Module.register_parameter = cls._original_register_parameter  # type: ignore[method-assign,assignment]
             cls._original_register_buffer = None
             cls._original_register_parameter = None
 
     @staticmethod
-    def _patched_register_buffer(self, name: str, tensor: torch.Tensor | None, persistent: bool = True):
+    def _patched_register_buffer(
+        self: nn.Module, name: str, tensor: torch.Tensor | None, persistent: bool = True
+    ) -> None:
         """Patched version that moves buffers to buffer device"""
         if tensor is not None and ModulePatcher._buffer_device:  # noqa: SIM102
             if tensor.device.type != ModulePatcher._buffer_device:
                 tensor = tensor.to(ModulePatcher._buffer_device)
-        ModulePatcher._original_register_buffer(self, name, tensor, persistent=persistent)
+        original_register_buffer = ModulePatcher._original_register_buffer
+        if original_register_buffer is None:
+            raise RuntimeError("ModulePatcher original register_buffer callback is missing")
+        original_register_buffer(self, name, tensor, persistent=persistent)
 
     @staticmethod
-    def _patched_register_parameter(self, name: str, param: nn.Parameter | None):
+    def _patched_register_parameter(self: nn.Module, name: str, param: nn.Parameter | None) -> None:
         """Patched version that moves parameters to param device"""
         if param is not None and ModulePatcher._param_device:  # noqa: SIM102
             if param.device.type != ModulePatcher._param_device:
@@ -163,7 +173,10 @@ class ModulePatcher:
                     param.data.to(ModulePatcher._param_device),
                     requires_grad=param.requires_grad,
                 )
-        ModulePatcher._original_register_parameter(self, name, param)
+        original_register_parameter = ModulePatcher._original_register_parameter
+        if original_register_parameter is None:
+            raise RuntimeError("ModulePatcher original register_parameter callback is missing")
+        original_register_parameter(self, name, param)
 
 
 def create_split_device_model(
@@ -245,12 +258,12 @@ class NestedParameterTracker:
         - Extend this tracker if those cases must be supported.
     """
 
-    def __init__(self):
-        self.nested_links = {}  # {(parent_path, attr_name): target_param_name}
+    def __init__(self) -> None:
+        self.nested_links: dict[tuple[str, str], str] = {}  # {(parent_path, attr_name): target_param_name}
         self.tracking = False
-        self._root_module = None  # Store root module during scanning
+        self._root_module: nn.Module | None = None  # Store root module during scanning
 
-    def start_tracking(self, module: nn.Module, verbose: bool = False):
+    def start_tracking(self, module: nn.Module, verbose: bool = False) -> None:
         """Start tracking nested parameter assignments
 
         Args:
@@ -265,7 +278,7 @@ class NestedParameterTracker:
         self.tracking = False
         self._root_module = None
 
-    def _scan_module(self, module: nn.Module, prefix: str):
+    def _scan_module(self, module: nn.Module, prefix: str) -> None:
         """Recursively scan module for nested parameters
 
         Args:
@@ -288,18 +301,21 @@ class NestedParameterTracker:
                     if isinstance(attr_value, nn.Parameter):
                         # Found a nested parameter! Find which registered param it is
                         # Get parent module using root module and prefix
-                        parent_module = self._get_module_by_path(self._root_module, prefix)
+                        root_module = cast("nn.Module", self._root_module)
+                        parent_module = self._get_module_by_path(root_module, prefix)
                         target_name = self._find_registered_param_relative(
-                            self._root_module, parent_module, prefix, attr_value
+                            root_module,
+                            parent_module,
+                            prefix,
+                            attr_value,
                         )
                         if target_name:
                             self.nested_links[param_full_path, attr_name] = target_name
 
         # Recurse into child modules
-        for child_name, child_module in module._modules.items():  # noqa: SLF001
-            if child_module is not None:
-                child_prefix = f"{prefix}.{child_name}" if prefix else child_name
-                self._scan_module(child_module, child_prefix)
+        for child_name, child_module in module.named_children():
+            child_prefix = f"{prefix}.{child_name}" if prefix else child_name
+            self._scan_module(child_module, child_prefix)
 
     def _get_module_by_path(self, root_module: nn.Module, path: str) -> nn.Module:
         """Get a submodule by dotted path"""
@@ -334,7 +350,7 @@ class NestedParameterTracker:
 
         return None
 
-    def diagnose_failures(self, module: nn.Module):
+    def diagnose_failures(self, module: nn.Module) -> None:
         """Diagnose why nested parameter restoration might fail
 
         Checks if tracked target parameters actually exist in the model.
@@ -365,7 +381,7 @@ class NestedParameterTracker:
 
         print("=" * 50)  # noqa: T201
 
-    def restore_links(self, module: nn.Module, verbose: bool = False):  # noqa: C901
+    def restore_links(self, module: nn.Module, verbose: bool = False) -> None:  # noqa: C901
         """Restore nested parameter links after load_state_dict
 
         Args:

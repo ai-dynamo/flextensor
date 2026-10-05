@@ -1,13 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 import logging
-from typing import Self
+from typing import Any, Self
 
 import torch
 
 from flextensor.host_pinning import HostPinner
 from flextensor.shm import FlexibleSharedMemory, ProcessFileLock
 from flextensor.shm.flexible_shm import LOCK_ACQUIRE_TIMEOUT
+from flextensor.shm.sync_primitives import BaseLock
 from flextensor.utils import (
     _DEFAULT_PACKED_TENSOR_ALIGNMENT_BYTES,
     _compute_packed_byte_layout,
@@ -26,25 +27,25 @@ class AllocationBlock:
 
     def __init__(
         self,
-        manager=None,
-        device="cpu",
-        block_size=None,
-        shm_block_name=None,
-        lock_class=None,
+        manager: Any = None,
+        device: str = "cpu",
+        block_size: int | None = None,
+        shm_block_name: str | None = None,
+        lock_class: type[BaseLock] | None = None,
         *,
         host_pinner: HostPinner,
         shm_owner: FlexibleSharedMemory | None = None,
-        **config,
-    ):
+        **config: Any,
+    ) -> None:
         self.manager = manager
-        self.tensors = []
-        self.views = []
-        self.tensor_offsets = []
+        self.tensors: list[torch.Tensor] = []
+        self.views: list[torch.Tensor] = []
+        self.tensor_offsets: list[int] = []
         self.device = device
         self.block_size = block_size
         self.shm_block_name = shm_block_name
-        self.lock_class = lock_class if lock_class is not None else ProcessFileLock
-        self.shm_block = None
+        self.lock_class: type[BaseLock] = lock_class if lock_class is not None else ProcessFileLock
+        self.shm_block: FlexibleSharedMemory | None = None
         self.shm_owner = shm_owner
         self.pinned_memory = config.get("pinned_memory", False)
         self.host_pinner: HostPinner = host_pinner
@@ -52,54 +53,63 @@ class AllocationBlock:
         self.release_tensor_memory = config.get("release_tensor_memory", False)
         if type(self.memory_alignment) is not int or self.memory_alignment <= 0:
             raise ValueError(f"memory_alignment must be a positive integer, got {self.memory_alignment!r}")
-        self.load_from_shm = config.get("load_from_shm", False)
-        self.shm_ptr = None
-        self.c_buf = None
+        self.load_from_shm: bool = config.get("load_from_shm", False)
+        self.shm_ptr: Any = None
+        self.c_buf: Any = None
         self.is_memory_creator = True
-        self.block = (
+        self.block: torch.Tensor | None = (
             self._make_base_block(block_size, device=device, pin_memory=self.pinned_memory)
             if block_size is not None
             else None
         )
 
-    def add(self, tensor: torch.Tensor):
+    def add(self, tensor: torch.Tensor) -> None:
         self.tensors.append(tensor)
 
-    def allocate(self):
+    def _require_block(self) -> torch.Tensor:
+        if self.block is None:
+            raise RuntimeError("Allocation block is not prepared")
+        return self.block
+
+    def allocate(self) -> list[torch.Tensor]:
         self._prepare_block()
         if self.is_memory_creator:
             self._tensors_to_memory_block()
         self.tensors.clear()
         return self.views
 
-    def project_views(self, gpu_block: Self):
+    def project_views(self, gpu_block: Self) -> tuple[list[torch.Tensor], torch.Tensor]:
+        block = self._require_block()
+        gpu_tensor = gpu_block._require_block()  # noqa: SLF001
         return (
             [
                 self._view_from_block(
-                    gpu_block.block,
+                    gpu_tensor,
                     view.dtype,
                     view.shape,
-                    view.storage_offset() * view.element_size(),
+                    int(view.storage_offset() * view.element_size()),
                     view.stride(),
                 )
                 for view in self.views
             ],
             self._view_from_block(
-                gpu_block.block,
-                gpu_block.block.dtype,
-                self.block.shape,
-                self.block.storage_offset() * self.block.element_size(),
-                self.block.stride(),
+                gpu_tensor,
+                gpu_tensor.dtype,
+                block.shape,
+                int(block.storage_offset() * block.element_size()),
+                block.stride(),
             ),
         )
 
-    def copy_to(self, tensor: torch.Tensor, non_blocking: bool = False):
+    def copy_to(self, tensor: torch.Tensor, non_blocking: bool = False) -> None:
         non_blocking = non_blocking and tensor.device.type == "cuda"
-        tensor.copy_(self.block, non_blocking=non_blocking)
+        tensor.copy_(self._require_block(), non_blocking=non_blocking)
 
-    def release(self):
+    def release(self) -> None:
         """Release shared memory resources."""
         if self.shm_block is not None:
+            if self.shm_block_name is None:
+                raise RuntimeError("Shared memory block has no name")
             sem_name = self.shm_block_name + "_rel_lock"
             lock = self.lock_class(sem_name, locked=False)
             with lock:
@@ -111,7 +121,7 @@ class AllocationBlock:
         self.tensors = []
         self.tensor_offsets = []
 
-    def _prepare_block(self):
+    def _prepare_block(self) -> None:
         self.tensor_offsets, tensor_offset = _compute_packed_byte_layout(
             (tensor.element_size() * tensor.numel() for tensor in self.tensors),
             self.memory_alignment,
@@ -120,7 +130,7 @@ class AllocationBlock:
         self.block = self._make_base_block(tensor_offset, device=self.device, pin_memory=self.pinned_memory)
         self._prepare_views()
 
-    def _make_base_block(self, nbytes: int, device: str = "cpu", pin_memory: bool = False):
+    def _make_base_block(self, nbytes: int, device: str = "cpu", pin_memory: bool = False) -> torch.Tensor:
         if self.shm_block_name is not None and device == "cpu":
             # Use shared memory
             # Assume at least 1 GiB/s host registration; tune this if slower hosts appear.
@@ -142,7 +152,10 @@ class AllocationBlock:
                 raise ValueError(
                     f"is_memory_creator ({self.is_memory_creator}) == load_from_shm ({self.load_from_shm})"
                 )
-            return torch.frombuffer(self.shm_block.block.buf, dtype=torch.uint8)
+            shm_block = self.shm_block.block
+            if shm_block is None or shm_block.buf is None:
+                raise RuntimeError("Shared memory block was closed during allocation")
+            return torch.frombuffer(shm_block.buf, dtype=torch.uint8)
 
         # Use regular memory
         # Create tensor on specified device first
@@ -151,7 +164,8 @@ class AllocationBlock:
             tensor = self.host_pinner.pin(tensor)
         return tensor
 
-    def _prepare_views(self):
+    def _prepare_views(self) -> None:
+        block = self._require_block()
         for tensor, tensor_offset in zip(self.tensors, self.tensor_offsets, strict=False):
             # Preserve the original stride pattern for dense layouts (e.g.
             # Fortran-contiguous weights created by ``weight.t()`` in modelopt).
@@ -159,10 +173,10 @@ class AllocationBlock:
             # bytes in the same memory order, so downstream kernels that rely on
             # a specific layout (column-major for CUTLASS FP8 GEMM) still work.
             stride = tensor.stride() if is_dense_layout(tensor) else None
-            view = self._view_from_block(self.block, tensor.dtype, tensor.shape, tensor_offset, stride)
+            view = self._view_from_block(block, tensor.dtype, tensor.shape, tensor_offset, stride)
             self.views.append(view)
 
-    def _tensors_to_memory_block(self):
+    def _tensors_to_memory_block(self) -> None:
         for view, tensor in zip(self.views, self.tensors, strict=False):
             view.copy_(tensor)
             if self.release_tensor_memory:
@@ -171,7 +185,14 @@ class AllocationBlock:
                 # the same tensor object ID (important for downstream ID-based lookups)
                 tensor.data = torch.empty(0, device="cpu", dtype=tensor.dtype)
 
-    def _view_from_block(self, base_uint8: torch.Tensor, dtype: torch.dtype, shape, offset_bytes: int = 0, stride=None):
+    def _view_from_block(
+        self,
+        base_uint8: torch.Tensor,
+        dtype: torch.dtype,
+        shape: torch.Size | tuple[int, ...],
+        offset_bytes: int = 0,
+        stride: tuple[int, ...] | None = None,
+    ) -> torch.Tensor:
         ust = base_uint8.untyped_storage()  # shared untyped memory
         t = torch.empty(0, dtype=dtype, device=base_uint8.device)
 
@@ -182,7 +203,7 @@ class AllocationBlock:
         storage_offset_elems = offset_bytes // t.element_size()
 
         # if stride=None -> use contiguous stride
-        t.set_(ust, storage_offset_elems, shape, stride)
+        t.set_(ust, storage_offset_elems, shape, stride)  # type: ignore[arg-type]
         return t
 
 
@@ -200,11 +221,11 @@ class AllocationManager:
         host_pinner: HostPinner,
         shm_owner: FlexibleSharedMemory | None = None,
         memory_alignment: int = _DEFAULT_PACKED_TENSOR_ALIGNMENT_BYTES,
-        lock_class=None,
+        lock_class: type[BaseLock] | None = None,
         release_tensor_memory: bool = False,
-    ):
+    ) -> None:
         # Initialize any tracking structures or state here
-        self.blocks = []
+        self.blocks: list[AllocationBlock] = []
         self.shm_block_name = shm_block_name_prefix
         self.block_index = 0
         self.load_from_shm = load_from_shm
@@ -215,7 +236,7 @@ class AllocationManager:
         self.lock_class = lock_class if lock_class is not None else ProcessFileLock
         self.release_tensor_memory = release_tensor_memory
 
-    def block(self, device="cpu"):
+    def block(self, device: str = "cpu") -> AllocationBlock:
         """
         Create a new allocation block.
         """
@@ -236,7 +257,7 @@ class AllocationManager:
         self.blocks.append(block)
         return block
 
-    def create_max_block(self, device="cuda"):
+    def create_max_block(self, device: str = "cuda") -> AllocationBlock:
         """
         Create a block that can fit the largest block in the manager, based on byte size.
         """
@@ -258,7 +279,7 @@ class AllocationManager:
             shm_owner=self.shm_owner,
         )
 
-    def release(self):
+    def release(self) -> None:
         for block in self.blocks:
             block.release()
         self.blocks = []

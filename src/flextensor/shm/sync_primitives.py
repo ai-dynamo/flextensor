@@ -29,7 +29,7 @@ import threading
 import time
 import weakref
 from abc import ABC, abstractmethod
-from typing import ClassVar
+from typing import IO, ClassVar, Literal, cast
 
 if sys.platform != "win32":
     import fcntl
@@ -59,18 +59,18 @@ class BaseLock(ABC):
     @abstractmethod
     def __init__(self, name: str, locked: bool = True, non_blocking: bool = False) -> None: ...
 
-    def __enter__(self):
+    def __enter__(self) -> "BaseLock":
         """Enter context manager - acquire lock."""
         self.acquire(non_blocking=self._init_non_blocking)
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> Literal[False]:
         """Exit context manager - release lock."""
         self.release()
         return False
 
     @abstractmethod
-    def acquire(self, non_blocking: bool = False, timeout: float | None = None):
+    def acquire(self, non_blocking: bool = False, timeout: float | None = None) -> None:
         """Acquire the lock.
 
         Args:
@@ -84,7 +84,7 @@ class BaseLock(ABC):
         """
 
     @abstractmethod
-    def release(self):
+    def release(self) -> None:
         """Release the lock.
 
         This method is idempotent - calling it when the lock is not held
@@ -94,15 +94,15 @@ class BaseLock(ABC):
         """
 
     @abstractmethod
-    def close(self):
+    def close(self) -> None:
         """Close the lock resource."""
 
     @abstractmethod
-    def unlink(self):
+    def unlink(self) -> None:
         """Remove the lock resource from the system."""
 
     @abstractmethod
-    def unlink_name(self):
+    def unlink_name(self) -> None:
         """Remove only the global lock name, retaining this local handle."""
 
 
@@ -145,7 +145,7 @@ class SemaphoreLock(BaseLock):
         if locked:
             self.acquire(non_blocking=non_blocking)
 
-    def acquire(self, non_blocking: bool = False, timeout: float | None = None):
+    def acquire(self, non_blocking: bool = False, timeout: float | None = None) -> None:
         """Acquire the lock.
 
         Args:
@@ -169,7 +169,7 @@ class SemaphoreLock(BaseLock):
             self.lock.acquire()
         self._held = True
 
-    def release(self):
+    def release(self) -> None:
         """Release the lock.
 
         This method is idempotent - calling it when the lock is not held
@@ -207,7 +207,7 @@ class SemaphoreLock(BaseLock):
         with contextlib.suppress(ValueError):
             self.lock.release()
 
-    def close(self):
+    def close(self) -> None:
         """Close the semaphore."""
         if getattr(self, "_closed", False):
             return
@@ -216,11 +216,11 @@ class SemaphoreLock(BaseLock):
         self.lock.close()
         self._closed = True
 
-    def unlink(self):
+    def unlink(self) -> None:
         """Remove the semaphore from the system."""
         self.unlink_name()
 
-    def unlink_name(self):
+    def unlink_name(self) -> None:
         """Remove the semaphore name without closing this process's handle."""
         with contextlib.suppress(posix_ipc.ExistentialError):
             posix_ipc.unlink_semaphore(self.name)
@@ -285,7 +285,7 @@ class ProcessFileLock(BaseLock):
         # Uses double-check locking pattern for thread safety
         self._thread_lock = self._get_or_create_thread_lock(self.path)
 
-        self.fd: object | None = None
+        self.fd: IO[str] | None = None
         self._init_non_blocking = non_blocking
         self._held = False
 
@@ -350,9 +350,10 @@ class ProcessFileLock(BaseLock):
         Raises:
             BlockingIOError: If lock cannot be acquired.
         """
+        fd = cast("IO[str]", self.fd)
         if non_blocking or timeout is None:
             flags = fcntl.LOCK_EX | (fcntl.LOCK_NB if non_blocking else 0)
-            fcntl.flock(self.fd.fileno(), flags)
+            fcntl.flock(fd.fileno(), flags)
         else:
             self._acquire_file_lock_until(time.monotonic() + timeout)
 
@@ -365,9 +366,10 @@ class ProcessFileLock(BaseLock):
         Raises:
             BlockingIOError: If timeout expires.
         """
+        fd = cast("IO[str]", self.fd)
         while True:
             try:
-                fcntl.flock(self.fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 return
             except BlockingIOError:
                 remaining = deadline - time.monotonic()
@@ -375,7 +377,7 @@ class ProcessFileLock(BaseLock):
                     raise BlockingIOError("Failed to acquire file lock before deadline") from None
                 time.sleep(min(0.01, remaining))
 
-    def acquire(self, non_blocking: bool = False, timeout: float | None = None):
+    def acquire(self, non_blocking: bool = False, timeout: float | None = None) -> None:
         """Acquire the lock.
 
         This method is thread-safe: it first acquires a shared thread lock for this path,
@@ -409,7 +411,7 @@ class ProcessFileLock(BaseLock):
             raise
         self._held = True
 
-    def release(self):
+    def release(self) -> None:
         """Release the lock without closing the file.
 
         This method releases both the file lock (inter-process) and the thread lock
@@ -444,19 +446,19 @@ class ProcessFileLock(BaseLock):
             self._held = True
             raise
 
-    def close(self):
+    def close(self) -> None:
         """Close the lock file."""
         self.release()
         if self.fd is not None:
             self.fd.close()
             self.fd = None
 
-    def unlink(self):
+    def unlink(self) -> None:
         """Remove the lock file from the system."""
         self.close()
         self.unlink_name()
 
-    def unlink_name(self):
+    def unlink_name(self) -> None:
         """Remove the lock path without releasing or closing this handle."""
         from pathlib import Path
 

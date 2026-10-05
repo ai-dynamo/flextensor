@@ -169,11 +169,11 @@ def _collect_source_tensors(  # noqa: C901 - preserves registration and alias or
             parameter_aliases[id(parameter)].append(name)
 
     result: list[tuple[str, tuple[str, ...], torch.Tensor, tuple[bool, ...] | None]] = []
-    for tensor_id, parameter in selected_parameter_objects.items():
+    for tensor_id, selected_parameter in selected_parameter_objects.items():
         result.append((
             "parameter",
             tuple(parameter_aliases[tensor_id]),
-            parameter,
+            selected_parameter,
             None,
         ))
 

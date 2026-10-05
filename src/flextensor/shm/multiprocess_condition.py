@@ -28,7 +28,7 @@ HEADER_SIZE = 5
 
 def _unlink_shared_memory(shm: SharedMemory) -> None:
     """Unlink an untracked mapping without leaving a stale tracker entry."""
-    tracker_name = shm._name  # noqa: SLF001
+    tracker_name = shm._name  # type: ignore[attr-defined]  # noqa: SLF001
     resource_tracker_register(tracker_name, "shared_memory")
     try:
         shm.unlink()
@@ -71,8 +71,8 @@ class SharedMultiString:
                 self.shm = SharedMemory(name=name, size=size, create=True)
                 self._created = True
                 # Initialize the header for new shared memory
-                self.shm.buf[0:4] = struct.pack("I", HEADER_SIZE)
-                self.shm.buf[4:5] = struct.pack("?", False)
+                self.shm.buf[0:4] = struct.pack("I", HEADER_SIZE)  # type: ignore[index]
+                self.shm.buf[4:5] = struct.pack("?", False)  # type: ignore[index]
             except FileExistsError:
                 # Already exists, connect to it
                 self.shm = SharedMemory(name=name, create=False)
@@ -81,7 +81,7 @@ class SharedMultiString:
             self.shm = SharedMemory(name=name, create=False)
         # Unregister from resource tracker to prevent spurious cleanup warnings in multiprocess scenarios
         # Use _name (with / prefix) to match what resource_tracker registered
-        resource_tracker_unregister(self.shm._name, "shared_memory")  # noqa: SLF001
+        resource_tracker_unregister(self.shm._name, "shared_memory")  # type: ignore[attr-defined]  # noqa: SLF001
         self._shm_name = self.shm.name
         self._name_unlinked = False
 
@@ -90,30 +90,30 @@ class SharedMultiString:
         if self.shm is None:
             msg = "SharedMultiString is closed"
             raise ValueError(msg)
-        pos = struct.unpack("I", self.shm.buf[0:4])[0]
+        pos = struct.unpack("I", self.shm.buf[0:4])[0]  # type: ignore[index]
         if pos > HEADER_SIZE:
             string = "|" + string
         arr = string.encode("utf-8")
         if pos + len(arr) > self.shm.size:
             msg = "Shared memory is full"
             raise ValueError(msg)
-        self.shm.buf[pos : pos + len(arr)] = arr
+        self.shm.buf[pos : pos + len(arr)] = arr  # type: ignore[index]
         pos += len(arr)
-        self.shm.buf[0:4] = struct.pack("I", pos)
+        self.shm.buf[0:4] = struct.pack("I", pos)  # type: ignore[index]
 
     def set_ready(self) -> None:
         """Mark the buffer as ready."""
         if self.shm is None:
             msg = "SharedMultiString is closed"
             raise ValueError(msg)
-        self.shm.buf[4:5] = struct.pack("?", True)
+        self.shm.buf[4:5] = struct.pack("?", True)  # type: ignore[index]
 
     def is_ready(self) -> bool:
         """Check if the buffer has been marked as ready."""
         if self.shm is None:
             msg = "SharedMultiString is closed"
             raise ValueError(msg)
-        return struct.unpack("?", self.shm.buf[4:5])[0]
+        return bool(struct.unpack("?", self.shm.buf[4:5])[0])  # type: ignore[index]
 
     def get_list(self) -> list[str]:
         """Return all strings in the buffer as a list."""
@@ -122,9 +122,9 @@ class SharedMultiString:
             raise ValueError(msg)
         # Read the current content length from shared memory header
         # (don't use self.pos as it may be stale in multiprocess scenarios)
-        pos = struct.unpack("I", self.shm.buf[0:4])[0]
+        pos = struct.unpack("I", self.shm.buf[0:4])[0]  # type: ignore[index]
         # Filter out empty strings that can result from splitting
-        s = bytes(self.shm.buf[HEADER_SIZE:pos]).decode("utf-8")
+        s = bytes(self.shm.buf[HEADER_SIZE:pos]).decode("utf-8")  # type: ignore[index]
         return s.split("|") if s else []
 
     def close(self) -> None:

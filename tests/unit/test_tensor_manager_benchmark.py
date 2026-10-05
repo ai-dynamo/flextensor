@@ -12,7 +12,7 @@ from flextensor.benchmark_tensor_mode import BenchmarkReplace, NoOpBenchmark, Pr
 from flextensor.collectors import IterativeLayerStatistics, LayerStatistics, TensorStatistics
 from flextensor.host_pinning import HostPinner
 from flextensor.profile_block_controller import ProfileBlockController
-from flextensor.strategy import KnapsackStrategy
+from flextensor.strategy import BlockStrategyData, KnapsackStrategy, StrategyResult
 from flextensor.tensor import TraceTensor
 from flextensor.tensor_manager import TensorManager
 
@@ -557,6 +557,42 @@ def _make_tm(**kwargs) -> TensorManager:
     }
     defaults.update(kwargs)
     return TensorManager(**defaults)
+
+
+def test_set_model_accepts_dict_metadata() -> None:
+    tm = _make_tm()
+    model = {"weight": torch.zeros(1), "metadata": "value"}
+
+    tm.set_model(model)
+
+    assert tm.model is model
+
+
+@patch("flextensor.tensor_manager.resolve_gpu_budget", return_value=None)
+def test_block_loader_normalizes_list_block_sizes(_budget) -> None:
+    tm = _make_tm(loader_type="raw_block_transfer")
+    tm.stats = []
+    tm.memory_transfer_stats = {}
+    tm.model = None
+    tm.tensors_map = {}
+    tm._create_loader = MagicMock()
+    tm._log_inference_diagnostics = MagicMock()
+    tm.tensor_manager_load_strategy = MagicMock()
+    tm.tensor_manager_load_strategy.compute.return_value = StrategyResult(
+        strategy_map={},
+        block_data=BlockStrategyData(
+            allocation_ordered={},
+            label_to_block_id={},
+            transfer_to_compute_map={},
+            label_to_size_map={},
+            block_sizes=[128, 256],
+        ),
+    )
+
+    tm._compute_strategy_and_build_loader()
+
+    loader_data = tm._create_loader.call_args.args[0]
+    assert loader_data.block_sizes == {0: 128, 1: 256}
 
 
 class TestUntracedTensorDiscoveryBranch:

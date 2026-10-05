@@ -63,6 +63,14 @@ def _require_block(shm: FlexibleSharedMemory | None, label: str) -> FlexibleShar
     return shm
 
 
+def _require_buffer(shm: FlexibleSharedMemory | None, label: str) -> memoryview:
+    """Return an open buffer for a required SHM block."""
+    block = _require_block(shm, label).block
+    if block is None or block.buf is None:
+        raise RuntimeError(f"ShmCoordinator: {label} SHM buffer is not initialised")
+    return block.buf
+
+
 class ShmCoordinator:
     """Orchestrates creator/follower SHM sharing.
 
@@ -169,12 +177,14 @@ class ShmCoordinator:
         if shm.main_lock is None:
             msg = "ShmCoordinator: coord SHM lock is not initialised"
             raise RuntimeError(msg)
-        buffer = shm.block.buf  # type: ignore[union-attr]
+        buffer = _require_buffer(shm, "coord")
 
         with shm.main_lock:
             header = CoordBlockHeader.read_from(buffer, offset=0)
             header.validate(expected_version=__version__, expected_protocol=SHM_PROTOCOL_VERSION)
             current = header.state
+            if not isinstance(current, CoordinatorState):
+                raise RuntimeError(f"Invalid coordinator state: {current}")
             if current == target:
                 return
             if current is not CoordinatorState.INITIALIZING:
@@ -216,7 +226,7 @@ class ShmCoordinator:
             profile_shm = _require_block(shm, "profile")
             # The OS may round the physical mapping up to a page. Only the
             # serialized profile's logical capacity and bytes are authoritative.
-            profile_shm.block.buf[: len(serialized)] = serialized  # type: ignore[union-attr]
+            _require_buffer(profile_shm, "profile")[: len(serialized)] = serialized
 
         profile_shm = FlexibleSharedMemory(
             name=prof_name,

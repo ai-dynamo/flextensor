@@ -5,6 +5,7 @@
 
 import collections
 import dataclasses
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -331,6 +332,12 @@ class TestReachableTensorMapProcessor:
         ids = compute_reachable_tensor_ids(model)
 
         assert ids == {id(t1), id(t2)}
+
+    def test_model_dict_returns_metadata_values(self) -> None:
+        model = ModelDict(model={"metadata": "value"})
+        model.tensor_manager = SimpleNamespace(is_traced_by_id=lambda _tensor_id: False)
+
+        assert model["metadata"] == "value"
 
     def test_module_with_nonstandard_missing_items_getattr(self) -> None:
         """Diffusers modules can raise ``KeyError`` for missing config attrs."""

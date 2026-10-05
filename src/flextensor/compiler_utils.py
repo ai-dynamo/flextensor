@@ -89,13 +89,13 @@ def patch_inductor_mutation_reads() -> bool:
         original_hash_init = FxGraphHashDetails.__init__
 
         @functools.wraps(original_hash_init)
-        def hash_init(details, *args, **kwargs):
+        def hash_init(details: FxGraphHashDetails, *args: Any, **kwargs: Any) -> None:
             original_hash_init(details, *args, **kwargs)
             # Hash-time tagging survives caller config contexts; also covers AOTAutograd's subclass.
             if _MUTATION_READS_CACHE_TAG not in details.cache_key_tag.split("|"):
                 details.cache_key_tag += "|" + _MUTATION_READS_CACHE_TAG
 
-        FxGraphHashDetails.__init__ = hash_init
+        FxGraphHashDetails.__init__ = hash_init  # type: ignore[method-assign, assignment]
         tiling.extract_normalized_read_writes = corrected
         LOGGER.info("Applied Inductor mutation-read compatibility fix (torch %s)", torch.__version__)
         return True

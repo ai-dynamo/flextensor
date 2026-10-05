@@ -43,6 +43,7 @@ class InstrumentationRegistry:
 
     _instance: "InstrumentationRegistry | None" = None
     _lock: threading.Lock = threading.Lock()
+    _initialized: bool
 
     def __new__(cls) -> "InstrumentationRegistry":
         """Create or return the singleton instance."""

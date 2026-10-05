@@ -306,8 +306,6 @@ class OffloadPhase(Enum):
 DEFAULT_MANAGER_NAME: str = "default"
 """Name used by :func:`get_offload_manager` when no explicit name is provided."""
 
-# Global singleton map for OffloadManager instances
-OFFLOAD_MANAGER_MAP = {}
 _MANAGER_MAP_LOCK = threading.Lock()
 
 # Config fields consumed by ``_initialize_tensor_manager`` when it constructs
@@ -381,12 +379,12 @@ def _safe_remove_hook_handle(handle: RemovableHandle, *, context: str) -> None:
 class OffloadModelProxy(ObjectWrapper):
     """Proxy that delegates to the current model version during offload phase transitions."""
 
-    def __init__(self, model, offload_manager: OffloadManager):
+    def __init__(self, model: nn.Module, offload_manager: OffloadManager) -> None:
         ObjectWrapper.__init__(self, model)
         # Store offload_manager directly on the proxy, bypassing ObjectWrapper delegation
         object.__setattr__(self, "offload_manager", offload_manager)
 
-    def _get_model(self):
+    def _get_model(self) -> nn.Module:
         """Helper method to get the current model, avoiding code duplication."""
         # Access offload_manager directly from proxy, bypassing ObjectWrapper delegation
         offload_manager = object.__getattribute__(self, "offload_manager")
@@ -394,13 +392,13 @@ class OffloadModelProxy(ObjectWrapper):
         if model is None:
             message = "Model not initialized. Ensure offload() has been called and the model hasn't been released."
             raise RuntimeError(message)
-        return model
+        return model  # type: ignore[no-any-return]
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
         """Invoke the underlying model; phase transitions fire via a forward hook."""
         return self._get_model()(*args, **kwargs)
 
-    def forward(self, *args, **kwargs):
+    def forward(self, *args: Any, **kwargs: Any) -> Any:
         """Invoke the underlying model; phase transitions fire via a forward hook."""
         return self._get_model()(*args, **kwargs)
 
@@ -410,28 +408,28 @@ class OffloadModelProxy(ObjectWrapper):
     # - __enter__, __exit__: context manager protocol
     # - __dir__: introspection support
 
-    def __iter__(self):
+    def __iter__(self) -> Any:
         """Delegate __iter__ to underlying model if it supports it."""
         model = self._get_model()
         if not hasattr(model, "__iter__"):
             raise TypeError(f"'{type(model).__name__}' object is not iterable")
-        return iter(model)
+        return iter(model)  # type: ignore[call-overload]
 
-    def __enter__(self):
+    def __enter__(self) -> Any:
         """Delegate __enter__ to underlying model for context manager protocol."""
         model = self._get_model()
         if not hasattr(model, "__enter__"):
             raise AttributeError(f"'{type(model).__name__}' object has no attribute '__enter__'")
-        return model.__enter__()
+        return model.__enter__()  # type: ignore[operator]
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Any:
         """Delegate __exit__ to underlying model for context manager protocol."""
         model = self._get_model()
         if not hasattr(model, "__exit__"):
             raise AttributeError(f"'{type(model).__name__}' object has no attribute '__exit__'")
-        return model.__exit__(exc_type, exc_val, exc_tb)
+        return model.__exit__(exc_type, exc_val, exc_tb)  # type: ignore[operator]
 
-    def __dir__(self):
+    def __dir__(self) -> list[str]:
         """Delegate __dir__ to underlying model to include model's attributes."""
         model = self._get_model()
         # Combine proxy's own attributes with model's attributes
@@ -447,7 +445,7 @@ class OffloadManager:
     phase management, profiling, and module patching capabilities.
     """
 
-    def __init__(self, name: str):
+    def __init__(self, name: str) -> None:
         self.name = name
         self._compiled = CompiledOffload(self)
         self.config = OffloadConfig()
@@ -489,7 +487,7 @@ class OffloadManager:
         """Stable id wired into compiled-offload custom ops for this manager."""
         return self._compiled.manager_id
 
-    def set_config(self, config: OffloadConfig):
+    def set_config(self, config: OffloadConfig) -> None:
         """Set configuration for the offload manager.
 
         Most fields take effect on the next phase transition or on the
@@ -843,13 +841,13 @@ class OffloadManager:
             raise RuntimeError("Cannot export runtime state before TensorManager initialization")
         return self._tensor_manager.export_state()
 
-    def benchmark_transfers(self):
+    def benchmark_transfers(self) -> None:
         """Benchmark weight transfer speeds."""
         if self._tensor_manager is None:
             return
         # TODO: Implement transfer benchmarking
 
-    def get_tensor_manager(self):
+    def get_tensor_manager(self) -> Any:
         """Get the internal tensor manager instance.
 
         Returns:
@@ -904,7 +902,8 @@ class OffloadManager:
             msg = "Tensor manager not initialized"
             raise RuntimeError(msg)
 
-        return self._tensor_manager.get_gpu_memory_usage()
+        result: GPUMemoryUsage = self._tensor_manager.get_gpu_memory_usage()
+        return result
 
     def reset_offload_timing(self) -> None:
         """Start a fresh durable offload-timing measure window.
@@ -998,7 +997,7 @@ class OffloadManager:
         """
         return self._model
 
-    def _initialize_tensor_manager(self):
+    def _initialize_tensor_manager(self) -> None:
         """Initialize TensorManager with config settings."""
         # Import here to avoid circular dependency between offload_manager and tensor_manager modules
         from flextensor.tensor_manager import TensorManager
@@ -1010,9 +1009,9 @@ class OffloadManager:
         tensor_manager_load_strategy = resolve_load_strategy(self.config)
 
         if not self.config.enabled:
-            benchmark_cls = PreloadToDevice
-            # pyright: ignore[reportUnknownReturnType]
-            self._tensor_manager = NoOpTensorManager(device_gpu, benchmark_cls=benchmark_cls)
+            self._tensor_manager = cast(
+                "TensorManagerProtocol", NoOpTensorManager(device_gpu, benchmark_cls=PreloadToDevice)
+            )
         else:
             self._tensor_manager = TensorManager(
                 device_gpu,
@@ -1043,7 +1042,7 @@ class OffloadManager:
         self._tensor_manager.use_shm = self.config.shm_enabled
         self._tensor_manager.shm_namespace = self.config.shm_namespace
 
-    def _transfer_hooks(self, old_model: nn.Module | None, new_model: nn.Module):  # noqa: C901
+    def _transfer_hooks(self, old_model: nn.Module | None, new_model: nn.Module) -> None:  # noqa: C901
         """Transfer hooks from old model to new model, preserving module hierarchy.
 
         Args:
@@ -1134,7 +1133,7 @@ class OffloadManager:
         original_forward_func = type(module).forward
         offload_manager = self
 
-        def patched_forward(self_module, *args, **kwargs):
+        def patched_forward(self_module: nn.Module, *args: Any, **kwargs: Any) -> Any:
             try:
                 # Bypass the public ``offload_block()`` so the user-facing
                 # ``skip_discovery`` guard does not block auto-trap usage, but
@@ -1163,25 +1162,24 @@ class OffloadManager:
         patched_forward = _compiler_disable(patched_forward)
 
         # Store original for restoration (using the UNBOUND function, not bound method)
-        module._ft_original_forward_func = original_forward_func  # noqa: SLF001
-        module._ft_offload_name = offload_name  # noqa: SLF001
+        module._ft_original_forward_func = original_forward_func  # type: ignore[assignment]  # noqa: SLF001
+        module._ft_offload_name = offload_name  # type: ignore[assignment]  # noqa: SLF001
 
         if self._compiled.active:
-            module._ft_compiled_offload_forward = build_compiled_offload_forward(  # noqa: SLF001
-                original_forward_func,
-                offload_name,
+            module._ft_compiled_offload_forward = build_compiled_offload_forward(  # type: ignore[assignment]  # noqa: SLF001
+                original_forward_func, offload_name
             )
 
         # Bind patched_forward as a method to the module.
         # This ensures it receives `self` when called.
-        module.forward = types.MethodType(patched_forward, module)  # type: ignore[method-assign]
+        module.forward = types.MethodType(patched_forward, module)  # type: ignore[method-assign, unused-ignore]
 
         # Track patched module for cleanup
         self._patched_modules.append(module)
         if self._compiled.active:
             # Stamped for multi-manager dispatch; the stable offload-unit name is
             # closed over by ``_ft_compiled_offload_forward`` (not an index).
-            module._ft_manager_id = self._compiled.manager_id  # noqa: SLF001
+            module._ft_manager_id = self._compiled.manager_id  # type: ignore[assignment]  # noqa: SLF001
 
     def _restore_module_forward(self, module: nn.Module) -> None:
         """Restore module's original forward method.
@@ -1210,7 +1208,7 @@ class OffloadManager:
         :meth:`offload_units` for the user-facing ``(name, module)`` listing.
         """
         return [
-            module._ft_offload_name  # noqa: SLF001
+            cast("str", module._ft_offload_name)  # noqa: SLF001
             for module in self._patched_modules
             if hasattr(module, "_ft_offload_name")
         ]
@@ -1279,13 +1277,13 @@ class OffloadManager:
         if not self._compiled.active:
             return
         for module in self._patched_modules:
-            module._ft_manager_id = self._compiled.manager_id  # noqa: SLF001
+            module._ft_manager_id = self._compiled.manager_id  # type: ignore[assignment]  # noqa: SLF001
         swapped = 0
         for module in self._patched_modules:
             compiled_forward = getattr(module, "_ft_compiled_offload_forward", None)
             if compiled_forward is None:
                 continue
-            module.forward = types.MethodType(compiled_forward, module)  # type: ignore[method-assign]
+            module.forward = types.MethodType(compiled_forward, module)  # type: ignore[method-assign, unused-ignore]
             swapped += 1
         LOGGER.info(
             "FlexTensor compiled-offload: installed compile-transparent forwards on %d/%d patched modules",
@@ -1603,7 +1601,7 @@ class OffloadManager:
             raise
 
     @_error_boundary
-    def _transition_to_warmup(self):
+    def _transition_to_warmup(self) -> None:
         """Transition to discovery phase.
 
         Method name kept to align with ``TensorManager.initialize_warmup()``.
@@ -1699,7 +1697,7 @@ class OffloadManager:
         return self._skip_discovery_honored
 
     @_error_boundary
-    def _transition_to_profile(self):
+    def _transition_to_profile(self) -> None:
         """Transition to profiling phase.
 
         Method name kept to align with ``TensorManager.initialize_profile()``.
@@ -1713,7 +1711,7 @@ class OffloadManager:
         self._compiled.on_enter_profile()
 
     @_error_boundary
-    def _transition_to_inference(self):
+    def _transition_to_inference(self) -> None:
         """Transition to inference phase."""
         try:
             if self._tensor_manager is None:
@@ -1911,7 +1909,7 @@ class OffloadManager:
             try:
                 self._initialize_tensor_manager()
             except Exception:
-                tensor_manager = self._tensor_manager
+                tensor_manager = object.__getattribute__(self, "_tensor_manager")
                 if tensor_manager is not None:
                     try:
                         tensor_manager.shutdown()
@@ -2812,6 +2810,10 @@ class _ManagerEntry:
     owner_thread: int
 
 
+# Global singleton map for OffloadManager instances
+OFFLOAD_MANAGER_MAP: dict[str, _ManagerEntry] = {}
+
+
 def get_offload_manager(name: str = DEFAULT_MANAGER_NAME) -> OffloadManager:
     """Get or create an OffloadManager singleton.
 
@@ -2848,7 +2850,7 @@ def get_offload_manager(name: str = DEFAULT_MANAGER_NAME) -> OffloadManager:
 # Convenience functions for the default offload manager
 
 
-def init(config: OffloadConfig | None = None, name: str = DEFAULT_MANAGER_NAME):
+def init(config: OffloadConfig | None = None, name: str = DEFAULT_MANAGER_NAME) -> None:
     om = get_offload_manager(name)
     om.init(config)
 
@@ -2882,7 +2884,7 @@ def offload(
     return om.offload(model, config, compile_fn=compile_fn)
 
 
-def set_config(config: OffloadConfig, name: str = DEFAULT_MANAGER_NAME):
+def set_config(config: OffloadConfig, name: str = DEFAULT_MANAGER_NAME) -> None:
     """Set config for the specified offload manager.
 
     Args:
@@ -2996,7 +2998,7 @@ def offload_block(block_name: str, name: str = DEFAULT_MANAGER_NAME) -> Any:
     return om.offload_block(block_name)
 
 
-def release(name: str = DEFAULT_MANAGER_NAME, *, preserve_model: bool = True):
+def release(name: str = DEFAULT_MANAGER_NAME, *, preserve_model: bool = True) -> None:
     """Release the specified offload manager.
 
     Args:

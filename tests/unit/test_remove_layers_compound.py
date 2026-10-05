@@ -3,6 +3,8 @@
 
 """Unit tests for remove_layers_compound function."""
 
+from enum import IntEnum
+
 import pytest
 
 from flextensor.collectors import LayerStatistics, TensorStatistics
@@ -201,6 +203,29 @@ class TestRemoveLayersCompound:
         # Remove layers at indices 1 and 3 (layer2 and layer4)
         expected_remaining = {"layer1", "layer3", "layer5"}
         assert set(result.keys()) == expected_remaining
+
+    def test_remove_layers_accepts_integer_subclasses(self, sample_strategy_map, sample_layer_stats):
+        """Integer-like indices follow Python's index protocol."""
+
+        class LayerIndex(IntEnum):
+            SECOND = 1
+
+        result = remove_layers_compound(
+            sample_strategy_map,
+            sample_layer_stats,
+            [{"type": "indices", "values": [LayerIndex.SECOND]}],
+        )
+
+        assert set(result) == {"layer1", "layer3", "layer4", "layer5"}
+
+    def test_remove_layers_rejects_boolean_indices(self, sample_strategy_map, sample_layer_stats):
+        """Booleans are flags, not layer indices."""
+        with pytest.raises(ValueError, match="list of integer values"):
+            remove_layers_compound(
+                sample_strategy_map,
+                sample_layer_stats,
+                [{"type": "indices", "values": [True]}],
+            )
 
     def test_remove_specific_layers_nonexistent(self, sample_strategy_map, sample_layer_stats):
         """Test removing specific layers that don't exist in strategy map."""

@@ -7,6 +7,7 @@ This module provides various functions for removing layers, filling gaps,
 and performing compound operations on strategy maps.
 """
 
+import operator
 from typing import Any
 
 from flextensor.collectors import LayerStatistics, TensorStatistics
@@ -348,9 +349,17 @@ def remove_layers_compound(  # noqa: C901
             layers_to_remove = get_layers_by_position(new_strategy_map, layer_stats, n)
         elif op_type == "names":
             names = op.get("values")
+            if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+                raise ValueError("names operation requires a list of string values")
             layers_to_remove = get_layers_by_names(new_strategy_map, names)
         elif op_type == "indices":
             indices = op.get("values")
+            if not isinstance(indices, list) or any(isinstance(index, bool) for index in indices):
+                raise ValueError("indices operation requires a list of integer values")
+            try:
+                indices = [operator.index(index) for index in indices]
+            except TypeError as error:
+                raise ValueError("indices operation requires a list of integer values") from error
             layers_to_remove = get_layers_by_indices(new_strategy_map, layer_stats, indices)
         elif op_type == "every_nth":
             layers_to_remove = get_layers_by_every_nth(new_strategy_map, layer_stats, step, offset)
@@ -403,22 +412,24 @@ def get_position_to_layer_name(layer_stats: list[LayerStatistics]) -> dict[int, 
     return {i: layer_stat.label for i, layer_stat in enumerate(layer_stats)}
 
 
-def calculate_transfer_positions(transfer_to_compute_map: dict[str, str], layer_stats: list[LayerStatistics]):
+def calculate_transfer_positions(
+    transfer_to_compute_map: dict[str, str], layer_stats: list[LayerStatistics]
+) -> tuple[set[int], set[int]]:
     """
     Calculate the positions of the transfers and the available positions.
     """
     layer_name_to_position = get_layer_name_to_position(layer_stats)
     transfer_positions = {
-        layer_name_to_position.get(transfer)
-        for transfer in transfer_to_compute_map
-        if transfer in layer_name_to_position
+        layer_name_to_position[transfer] for transfer in transfer_to_compute_map if transfer in layer_name_to_position
     }
     available_positions = set(range(len(layer_stats))) - transfer_positions
     return transfer_positions, available_positions
 
 
-def calculate_compute_position_by_block_id(label_to_block_id: dict[str, int], transfer_to_compute_map: dict[str, str]):
-    compute_by_block = {}
+def calculate_compute_position_by_block_id(
+    label_to_block_id: dict[str, int], transfer_to_compute_map: dict[str, str]
+) -> dict[int, list[tuple[str, str, int]]]:
+    compute_by_block: dict[int, list[tuple[str, str, int]]] = {}
     for transfer_layer, compute_layer in transfer_to_compute_map.items():
         block_id = label_to_block_id.get(transfer_layer)
         if block_id is not None:
@@ -435,18 +446,18 @@ def find_previous_compute_position_from_transfer(
     transfer_to_compute_map: dict[str, str],
     label_to_block_id: dict[str, int],
     layer_name_to_position: dict[str, int],
-):
+) -> int:
     """
     Find the previous compute layer position for the given layer name from the transfer.
     If there is no previous compute layer, return -1.
     """
     compute_by_block = calculate_compute_position_by_block_id(label_to_block_id, transfer_to_compute_map)
     compute_by_current_block = compute_by_block[block_id]
-    layer_positions = [
-        layer_name_to_position.get(compute_layer)
-        for _transfer_layer, compute_layer, _block_id in compute_by_current_block
-    ]
-    transfer_layer_position = layer_name_to_position.get(transfer_layer_name)
+    layer_positions = []
+    for _transfer_layer, compute_layer, _block_id in compute_by_current_block:
+        layer_positions.append(layer_name_to_position[compute_layer])
+
+    transfer_layer_position = layer_name_to_position[transfer_layer_name]
     layer_positions.append(transfer_layer_position)
     layer_positions.sort()
     transfer_layer_position_index = layer_positions.index(transfer_layer_position)
@@ -534,7 +545,7 @@ def check_overlap_constraint(  # noqa: C901
     overlap_violations = []
 
     # Group transfers by block_id
-    transfers_by_block = {}
+    transfers_by_block: dict[int, list[tuple[str, str]]] = {}
     for transfer_layer, compute_layer in transfer_to_compute_map.items():
         block_id = label_to_block_id.get(transfer_layer)
         if block_id is not None:
@@ -559,7 +570,7 @@ def check_overlap_constraint(  # noqa: C901
             transfer_compute_pairs.append((transfer_layer, compute_layer, transfer_pos, compute_pos))
 
         # Check for position overlaps (exact same position)
-        all_positions = {}  # position -> list of (type, layer_name)
+        all_positions: dict[int, list[tuple[str, str]]] = {}  # position -> list of (type, layer_name)
 
         for transfer_layer, compute_layer, transfer_pos, compute_pos in transfer_compute_pairs:
             # Track positions
@@ -642,13 +653,11 @@ def rearrange_transfers(  # noqa: C901
     position_to_layer_name = get_position_to_layer_name(layer_stats)
 
     transfer_positions = {
-        layer_name_to_position.get(transfer)
-        for transfer in transfer_to_compute_map
-        if transfer in layer_name_to_position
+        layer_name_to_position[transfer] for transfer in transfer_to_compute_map if transfer in layer_name_to_position
     }
     available_positions = set(range(len(layer_stats))) - transfer_positions
 
-    transfers_by_block = {}
+    transfers_by_block: dict[int, list[tuple[str, str, int]]] = {}
     for transfer_layer, compute_layer in transfer_to_compute_map.items():
         block_id = label_to_block_id.get(transfer_layer)
         if block_id is not None:
@@ -683,8 +692,8 @@ def rearrange_transfers(  # noqa: C901
             layer_name_to_position,
         )
 
-        transfer_position = layer_name_to_position.get(transfer_layer)
-        compute_position = layer_name_to_position.get(compute_layer)
+        transfer_position = layer_name_to_position[transfer_layer]
+        compute_position = layer_name_to_position[compute_layer]
 
         if prev_compute_position == -1:
             local_available_free_slots = available_positions & set(range(compute_position))
@@ -853,7 +862,7 @@ def create_allocation_ordered(
         Input: {'layer.0': 0, 'layer.1': 1, 'layer.2': 2, 'layer.3': 3, 'layer.4': 0, 'layer.5': 1}
         Output: {0: ['layer.0', 'layer.4'], 1: ['layer.1', 'layer.5'], 2: ['layer.2'], 3: ['layer.3']}
     """
-    allocation_ordered = {}
+    allocation_ordered: dict[int, list[str]] = {}
 
     # Group layers by block ID
     for layer_name, block_id in label_to_block_id.items():

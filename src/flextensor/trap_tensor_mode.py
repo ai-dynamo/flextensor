@@ -11,24 +11,24 @@ from flextensor.compiler_utils import graph_break as _graph_break
 
 
 class Trap(TorchFunctionMode):
-    def __init__(self, tensor_manager, trace_id, device_gpu):
+    def __init__(self, tensor_manager: Any, trace_id: Any, device_gpu: Any) -> None:
         self.current_trace_id = trace_id
         self.device_gpu = device_gpu
         self.tensor_layer_loader = tensor_manager.tensor_layer_loader
-        self.tensors_ids = set()
+        self.tensors_ids: set[Any] = set()
         self.tensor_manager = tensor_manager
         self.start_event = tensor_manager.trap_start_event
         self.end_event = tensor_manager.trap_end_event
         self._nesting_guard = tensor_manager.trap_nesting_guard
 
-    def __enter__(self):
+    def __enter__(self) -> "Trap":
         _graph_break()
         self._nesting_guard.acquire(self.current_trace_id)
         try:
             self.tensor_manager.reset_current_trap_taint()
             self.tensor_layer_loader.enter(self.current_trace_id)
             self.start_event.record()
-            return super().__enter__()
+            return cast("Trap", super().__enter__())
         except BaseException:
             # Release the guard so the next trap doesn't fail with a misleading
             # "Nested traps are not supported" error masking the real cause.
@@ -39,7 +39,7 @@ class Trap(TorchFunctionMode):
             _graph_break()
             raise
 
-    def __exit__(self, _type, _value, _traceback):
+    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
         try:
             try:
                 self.end_event.record()
@@ -66,7 +66,7 @@ class Trap(TorchFunctionMode):
             _graph_break()
             super().__exit__(_type, _value, _traceback)
 
-    def __torch_function__(self, func, _types, args, kwargs=None):
+    def __torch_function__(self, func: Any, _types: Any, args: Any, kwargs: Any = None) -> Any:  # type: ignore[override]
         # rewrite args
         new_args = []
         for arg in args:
@@ -98,26 +98,26 @@ class Trap(TorchFunctionMode):
 
 
 class WarmupTrap(TorchFunctionMode):
-    def __init__(self, tensor_manager, trace_id, device_gpu):
+    def __init__(self, tensor_manager: Any, trace_id: Any, device_gpu: Any) -> None:
         self.current_trace_id = trace_id
         self.device_gpu = device_gpu
-        self.tensors_ids = set()
+        self.tensors_ids: set[Any] = set()
         self.tensor_manager = tensor_manager
         self._nesting_guard = tensor_manager.trap_nesting_guard
 
-    def __enter__(self):
+    def __enter__(self) -> "WarmupTrap":
         _graph_break()
         try:
             self._nesting_guard.acquire(self.current_trace_id)
             if self.tensor_manager.module_tracker is not None:
                 self.tensor_manager.module_tracker.enter_trap(self.current_trace_id)
-            return super().__enter__()
+            return cast("WarmupTrap", super().__enter__())
         except BaseException:
             # See Trap.__enter__: pair the graph break on the failure path.
             _graph_break()
             raise
 
-    def __exit__(self, _type, _value, _traceback):
+    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
         if self.tensor_manager.module_tracker is not None:
             self.tensor_manager.module_tracker.exit_trap(self.current_trace_id)
         self.tensor_manager.record_tensors(self.current_trace_id, self.tensors_ids)
@@ -125,7 +125,7 @@ class WarmupTrap(TorchFunctionMode):
         _graph_break()
         super().__exit__(_type, _value, _traceback)
 
-    def _update_tensors_ids(self, args, kwargs):
+    def _update_tensors_ids(self, args: Any, kwargs: Any) -> None:
         for arg in args:
             if self.tensor_manager.is_traced(arg):
                 tensor_id = id(arg)
@@ -136,7 +136,7 @@ class WarmupTrap(TorchFunctionMode):
                     tensor_id = id(arg)
                     self.tensors_ids.add(tensor_id)
 
-    def __torch_function__(self, func, _types, args, kwargs=None):
+    def __torch_function__(self, func: Any, _types: Any, args: Any, kwargs: Any = None) -> Any:  # type: ignore[override]
         self._update_tensors_ids(args, kwargs)
 
         new_args = []
@@ -171,28 +171,28 @@ class WarmupTrap(TorchFunctionMode):
 
 
 class TrapInfer(TorchFunctionMode):
-    def __init__(self, tensor_manager, trace_id, device_gpu):
+    def __init__(self, tensor_manager: Any, trace_id: Any, device_gpu: Any) -> None:
         self.current_trace_id = trace_id
         self.device_gpu = device_gpu
         self.tensor_layer_loader = tensor_manager.tensor_layer_loader
         self.tensor_manager = tensor_manager
 
-    def __enter__(self):
+    def __enter__(self) -> "TrapInfer":
         _graph_break()
         try:
             self.tensor_layer_loader.enter(self.current_trace_id)
-            return super().__enter__()
+            return cast("TrapInfer", super().__enter__())
         except BaseException:
             # See Trap.__enter__: pair the graph break on the failure path.
             _graph_break()
             raise
 
-    def __exit__(self, _type, _value, _traceback):
+    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
         self.tensor_layer_loader.exit(self.current_trace_id)
         _graph_break()
         super().__exit__(_type, _value, _traceback)
 
-    def __torch_function__(self, func, types, args, kwargs=None):
+    def __torch_function__(self, func: Any, _types: Any, args: Any, kwargs: Any = None) -> Any:  # type: ignore[override]
         new_args = []
         for arg in args:
             new_arg = arg
@@ -324,17 +324,17 @@ class WarmupTrapDirect(TorchFunctionMode):
 
 
 class TrapDirect:
-    def __init__(self, tensor_manager, trace_id, device_gpu):
+    def __init__(self, tensor_manager: Any, trace_id: Any, device_gpu: Any) -> None:
         self.current_trace_id = trace_id
         self.device_gpu = device_gpu
         self.tensor_layer_loader = tensor_manager.tensor_layer_loader
-        self.tensors_ids = set()
+        self.tensors_ids: set[Any] = set()
         self.tensor_manager = tensor_manager
         self.start_event = tensor_manager.trap_start_event
         self.end_event = tensor_manager.trap_end_event
         self._nesting_guard = tensor_manager.trap_nesting_guard
 
-    def __enter__(self):
+    def __enter__(self) -> "TrapDirect":
         _graph_break()
         self._nesting_guard.acquire(self.current_trace_id)
         try:
@@ -350,7 +350,7 @@ class TrapDirect:
             _graph_break()
             raise
 
-    def __exit__(self, _type, _value, _traceback):
+    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
         try:
             try:
                 self.end_event.record()
@@ -376,13 +376,13 @@ class TrapDirect:
 class TrapInferDirect:
     """Eager inference trap for manual ``offload_block`` (outside the compiled graph)."""
 
-    def __init__(self, tensor_manager, trace_id, device_gpu):
+    def __init__(self, tensor_manager: Any, trace_id: Any, device_gpu: Any) -> None:
         self.current_trace_id = trace_id
         self.device_gpu = device_gpu
         self.tensor_layer_loader = tensor_manager.tensor_layer_loader
         self.tensor_manager = tensor_manager
 
-    def __enter__(self):
+    def __enter__(self) -> "TrapInferDirect":
         _graph_break()
         try:
             self.tensor_layer_loader.enter(self.current_trace_id)
@@ -392,7 +392,7 @@ class TrapInferDirect:
             _graph_break()
             raise
 
-    def __exit__(self, _type, _value, _traceback):
+    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
         self.tensor_layer_loader.exit(self.current_trace_id)
         _graph_break()
 
@@ -413,7 +413,7 @@ class TrapProfileView:
     work.
     """
 
-    def __init__(self, tensor_manager, trace_id, device_gpu):
+    def __init__(self, tensor_manager: Any, trace_id: Any, device_gpu: Any) -> None:
         self.current_trace_id = trace_id
         self.device_gpu = device_gpu
         self.tensor_layer_loader = tensor_manager.tensor_layer_loader
@@ -422,7 +422,7 @@ class TrapProfileView:
         self.end_event = tensor_manager.trap_end_event
         self._nesting_guard = tensor_manager.trap_nesting_guard
 
-    def __enter__(self):
+    def __enter__(self) -> "TrapProfileView":
         _graph_break()
         self._nesting_guard.acquire(self.current_trace_id)
         try:
@@ -437,7 +437,7 @@ class TrapProfileView:
             _graph_break()
             raise
 
-    def __exit__(self, _type, _value, _traceback):
+    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
         try:
             self.end_event.record()
             self.end_event.synchronize()

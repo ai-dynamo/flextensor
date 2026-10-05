@@ -40,11 +40,11 @@ _participant_counter_lock = threading.Lock()
 
 def _unlink_untracked_shm(shm: SharedMemory) -> None:
     """Unlink a tracker-exempt SHM handle without leaving a stale registration."""
-    resource_tracker_register(shm._name, "shared_memory")  # noqa: SLF001
+    resource_tracker_register(shm._name, "shared_memory")  # type: ignore[attr-defined]  # noqa: SLF001
     try:
         shm.unlink()
     except BaseException as error:
-        resource_tracker_unregister(shm._name, "shared_memory")  # noqa: SLF001
+        resource_tracker_unregister(shm._name, "shared_memory")  # type: ignore[attr-defined]  # noqa: SLF001
         if not isinstance(error, FileNotFoundError):
             raise
 
@@ -102,31 +102,41 @@ class KeepAliveDict:
         # For SharedMemory, respect is_creator but handle already-exists gracefully
         if is_creator:
             try:
-                self.shm = SharedMemory(name=meta_name, create=True, size=size)
+                shm = SharedMemory(name=meta_name, create=True, size=size)
             except FileExistsError:
                 # Creator expected to create, but it already exists - connect to it
-                self.shm = SharedMemory(name=meta_name, create=False)
+                shm = SharedMemory(name=meta_name, create=False)
         else:
             # Not creator - just connect
-            self.shm = SharedMemory(name=meta_name, create=False)
+            shm = SharedMemory(name=meta_name, create=False)
+        self.shm: SharedMemory | None = shm
         # Use _name (with / prefix) to match what resource_tracker registered
-        resource_tracker_unregister(self.shm._name, "shared_memory")  # noqa: SLF001
+        resource_tracker_unregister(shm._name, "shared_memory")  # type: ignore[attr-defined]  # noqa: SLF001
 
         # macOS may round the POSIX mapping up to a page; expose only the
         # protocol-requested timestamp slots so capacity is platform-stable.
-        self.shm_view = self.shm.buf.cast("d")[: size // 8]
+        shm_buffer = shm.buf
+        if shm_buffer is None:
+            raise RuntimeError("Shared memory buffer is unavailable")
+        self.shm_view: memoryview | None = shm_buffer.cast("d")[: size // 8]  # type: ignore[assignment]
         self._closed = False
         self._meta_name_unlinked = False
         self._dict_name_unlinked = False
 
+    def _view(self) -> Any:
+        if self.shm_view is None:
+            raise RuntimeError("Keep-alive dictionary is closed")
+        return self.shm_view
+
     def prepare_slot(self, process_id: int) -> int:
         """Allocate a slot for a participant. It is not thread-safe or multi-process safe on its own."""
         if process_id in self.dict:
-            return self.dict[process_id]
+            return int(self.dict[process_id])
+        shm_view = self._view()
 
         # Always compute the next available slot dynamically based on current dict state
         # This ensures correct behavior across multiple participants
-        used_slots = set()
+        used_slots: set[int] = set()
         max_slot = -1
         for _, existing_slot in self.dict.items():
             used_slots.add(existing_slot)
@@ -134,7 +144,7 @@ class KeepAliveDict:
                 max_slot = existing_slot
 
         # Find a free slot (either reuse a gap or allocate new)
-        slot = None
+        slot: int | None = None
         for candidate in range(max_slot + 1):
             if candidate not in used_slots:
                 slot = candidate
@@ -144,7 +154,7 @@ class KeepAliveDict:
 
         # POSIX may round tiny SHM allocations up to a page. Enforce the
         # requested protocol capacity rather than the platform allocation size.
-        capacity = len(self.shm_view)
+        capacity = len(shm_view)
         if slot >= capacity:
             msg = (
                 f"KeepAliveDict timestamp slots exhausted: participant_id={process_id}, slot={slot}, "
@@ -165,25 +175,28 @@ class KeepAliveDict:
                 f"slot={slot}, keep_alive_dict_size={self.size}"
             )
             raise RuntimeError(msg) from e
-        self.shm_view[slot] = time.time()
+        shm_view[slot] = time.time()
         return slot
 
     def set_by_slot(self, slot: int, timestamp: int | float) -> None:
         """Set the timestamp for a given slot index."""
-        self.shm_view[slot] = float(timestamp)
+        shm_view = self._view()
+        shm_view[slot] = float(timestamp)
 
     def pop(self, process_id: int) -> float:
         """Remove a participant from the dict. Must be called while holding the keep-alive lock."""
-        slot = self.dict.pop(process_id)
-        val = self.shm_view[slot]
+        slot = int(self.dict.pop(process_id))
+        shm_view = self._view()
+        val = float(shm_view[slot])
         # Clear the slot timestamp (slot will be reused by prepare_slot if needed)
-        self.shm_view[slot] = 0.0
+        shm_view[slot] = 0.0
         return val
 
     def items(self) -> Iterator[tuple[int, float]]:
         """Yield (participant_id, timestamp) pairs for all registered participants."""
+        shm_view = self._view()
         for participant_id, slot in self.dict.items():
-            yield participant_id, self.shm_view[slot]
+            yield participant_id, float(shm_view[slot])
 
     def __contains__(self, process_id: int) -> bool:
         """Check if the participant ID passed as process_id is in the dictionary."""
@@ -281,18 +294,18 @@ class KeepAlive:
         self.keep_alive_seconds = keep_alive_seconds
         self._registration_key = (dict_name, self.participant_id)
         self._registered: bool = False
-        self.keep_alive_dict = KeepAliveDict(
+        self.keep_alive_dict: KeepAliveDict | None = KeepAliveDict(
             name=dict_name, size=keep_alive_dict_size, is_creator=is_creator, meta_name=dict_meta_name
         )
         self.create_lock = is_creator
         self._lock_name_unlinked = False
         self.stop_event = threading.Event()  # Event to signal thread to stop
-        self.keep_alive_thread: threading.Thread | None = None
         self.lock_class = lock_class
+        self.keep_alive_thread: threading.Thread | None = None
 
         try:
             # Create or connect to lock, then acquire it for initialization
-            self.lock = self.lock_class(lock_name, locked=False)
+            self.lock: BaseLock | None = self.lock_class(lock_name, locked=False)
             self.lock.acquire(non_blocking=False, timeout=LOCK_ACQUIRE_TIMEOUT)
         except BaseException as e:
             self._cleanup_init_failure(unlink=unlink_on_init_failure)
@@ -325,10 +338,11 @@ class KeepAlive:
 
     def _cleanup_init_failure(self, *, unlink: bool) -> None:
         with contextlib.suppress(Exception):
-            if unlink:
-                self.keep_alive_dict.unlink()
-            else:
-                self.keep_alive_dict.close()
+            if self.keep_alive_dict is not None:
+                if unlink:
+                    self.keep_alive_dict.unlink()
+                else:
+                    self.keep_alive_dict.close()
 
         lock = getattr(self, "lock", None)
         if lock is not None:
@@ -358,18 +372,24 @@ class KeepAlive:
             self._registered = False
             return last_registration
 
+    def _resources(self) -> tuple[BaseLock, KeepAliveDict]:
+        if self.lock is None or self.keep_alive_dict is None:
+            raise RuntimeError("Keep-alive resources are closed")
+        return self.lock, self.keep_alive_dict
+
     def stop(self, lock_timeout: float | None = None) -> None:
         """Stop the keep-alive thread and unregister this participant."""
         self.stop_event.set()  # Signal thread to stop
         if self.keep_alive_thread is not None:
             self.keep_alive_thread.join(timeout=2)  # Wait max 2 seconds for thread to finish
             self.keep_alive_thread = None
-        self.lock.acquire(non_blocking=False, timeout=lock_timeout)
+        lock, keep_alive_dict = self._resources()
+        lock.acquire(non_blocking=False, timeout=lock_timeout)
         try:
-            if self._release_registration() and self.participant_id in self.keep_alive_dict:
-                self.keep_alive_dict.pop(self.participant_id)
+            if self._release_registration() and self.participant_id in keep_alive_dict:
+                keep_alive_dict.pop(self.participant_id)
         finally:
-            self.lock.release()
+            lock.release()
 
     def unlink_names(self) -> None:
         """Remove keepalive data/meta/lock names without closing handles."""
@@ -405,18 +425,19 @@ class KeepAlive:
     def any_process_alive(self, lock_timeout: float | None = None) -> bool:
         """Check if any registered participant heartbeat is live and remove stale entries."""
         current_time = time.time()
-        self.lock.acquire(non_blocking=False, timeout=lock_timeout)
+        lock, keep_alive_dict = self._resources()
+        lock.acquire(non_blocking=False, timeout=lock_timeout)
         try:
-            alive_items = list(self.keep_alive_dict.items())
+            alive_items = list(keep_alive_dict.items())
             alive = False
             for participant_id, timestamp in alive_items:
                 if timestamp < current_time - self.keep_alive_seconds:
-                    self.keep_alive_dict.pop(participant_id)
+                    keep_alive_dict.pop(participant_id)
                 else:
                     alive = True
             return alive
         finally:
-            self.lock.release()
+            lock.release()
 
     def is_process_alive(self, process_id: int, lock_timeout: float | None = None) -> bool:
         """Check one registered participant heartbeat, removing it if stale.
@@ -425,18 +446,19 @@ class KeepAlive:
         names are retained for Python API compatibility.
         """
         current_time = time.time()
-        self.lock.acquire(non_blocking=False, timeout=lock_timeout)
+        lock, keep_alive_dict = self._resources()
+        lock.acquire(non_blocking=False, timeout=lock_timeout)
         try:
-            for participant_id, timestamp in self.keep_alive_dict.items():
+            for participant_id, timestamp in keep_alive_dict.items():
                 if participant_id != process_id:
                     continue
                 if timestamp < current_time - self.keep_alive_seconds:
-                    self.keep_alive_dict.pop(participant_id)
+                    keep_alive_dict.pop(participant_id)
                     return False
                 return True
             return False
         finally:
-            self.lock.release()
+            lock.release()
 
     def _start_keep_alive_thread(self) -> None:
         self.keep_alive_thread = threading.Thread(target=self._keep_alive_thread)
@@ -448,7 +470,10 @@ class KeepAlive:
             # Use event.wait() instead of time.sleep() so we can be interrupted quickly
             if self.stop_event.wait(timeout=self.keep_alive_seconds / 2):
                 break  # Event was set, stop immediately
-            self.keep_alive_dict.set_by_slot(self.slot, time.time())
+            keep_alive_dict = self.keep_alive_dict
+            if keep_alive_dict is None:
+                break
+            keep_alive_dict.set_by_slot(self.slot, time.time())
 
 
 class FlexibleSharedMemory:
@@ -764,10 +789,8 @@ class FlexibleSharedMemory:
         try:
             registry.pin_in_place(pinned_view)
         except Exception as exc:
-            # No instance field owns the view yet, so dropping this local
-            # reference and traceback lets constructor rollback close the SHM
-            # mapping without an exported buffer.
-            pinned_view = None
+            # Strip the traceback so constructor rollback can close the SHM
+            # mapping without this frame retaining its exported buffer.
             raise exc.with_traceback(None) from None
         self._host_pin_registry = registry
         self._pinned_shm_view = pinned_view
@@ -962,7 +985,7 @@ class FlexibleSharedMemory:
             is_created = False
         # Unregister from resource tracker to prevent spurious cleanup warnings in multiprocess scenarios
         # Use _name (with / prefix) to match what resource_tracker registered
-        resource_tracker_unregister(self.shm._name, "shared_memory")  # noqa: SLF001
+        resource_tracker_unregister(self.shm._name, "shared_memory")  # type: ignore[attr-defined]  # noqa: SLF001
         self.shm_size = self.shm.size
 
         return is_created

@@ -7,7 +7,7 @@ import statistics
 import threading
 import types
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from torch import nn
 
@@ -227,10 +227,10 @@ class CompiledOffload:
     def eager_profiling_iters(self) -> int:
         if self.active and self.replan_active and not self.profile_active:
             return COMPILED_EAGER_PROFILE_FORWARDS
-        return self._host.config.profiling_iters
+        return cast("int", self._host.config.profiling_iters)
 
     def measure_forwards(self) -> int:
-        return self._host.config.profiling_iters
+        return cast("int", self._host.config.profiling_iters)
 
     def extra_iters_before_inference(self) -> int:
         # Compile-warmup forwards for view compiled-profile (not counted in profiling_iters).
@@ -489,7 +489,7 @@ class CompiledOffload:
                 get_tensor_manager=lambda: host._tensor_manager,  # noqa: SLF001
                 should_record_duration=self.should_record_profile_compile_duration,
             )
-            module.forward = types.MethodType(profile_forward, module)  # type: ignore[method-assign]
+            module.forward = types.MethodType(profile_forward, module)
             swapped += 1
         LOGGER.info(
             "FlexTensor compiled-profile: installed traceable view-profile forwards on %d module(s).",

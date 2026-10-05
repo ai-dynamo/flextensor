@@ -5,6 +5,8 @@ import os
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
+from functools import partial
+from typing import cast
 
 import torch
 
@@ -254,7 +256,7 @@ class _RawTensorDataBinder:
                 (size - 1) * stride for size, stride in zip(tensor.shape, tensor.stride(), strict=True)
             )
             element_size = tensor.element_size()
-            return first_element * element_size, (last_element + 1) * element_size
+            return cast("tuple[int, int]", (first_element * element_size, (last_element + 1) * element_size))
 
         left_bounds = byte_bounds(left)
         right_bounds = byte_bounds(right)
@@ -679,6 +681,10 @@ class TensorStrategyLoader(Loader):
     It supports preloading, asynchronous transfers, and scheduled memory cleanup based on defined policies.
     """
 
+    scheduled_releases: dict[str, torch.cuda.Event]
+    transfer_events: dict[int, torch.cuda.Event]
+    scheduled_transfers: dict[str, torch.cuda.Event]
+
     def __init__(
         self,
         layer_stats: list[LayerStatistics],
@@ -697,10 +703,10 @@ class TensorStrategyLoader(Loader):
         self.strategy_map = strategy_map
         self.release_strategy_map = release_strategy_map
         self.tensors_map = tensors_map
-        self.cpu_to_gpu_map = {}
+        self.cpu_to_gpu_map: dict[int, torch.Tensor] = {}
         # create transfer stream with higher priority
         self.transfer_stream = torch.cuda.Stream(device=self.device_gpu, priority=stream_priority)
-        self.transfer_ongoing = set()
+        self.transfer_ongoing: set[int] = set()
         self.release_tensors = release_tensors
         self.use_events = True
 
@@ -755,11 +761,11 @@ class TensorStrategyLoader(Loader):
         self.scheduled_transfers = {}
         self.del_tensor = delete_tensor_func
 
-        self.tensor_id_to_release_label = {}
-        self.load_to_release_labels_map = {}
+        self.tensor_id_to_release_label: dict[int, str] = {}
+        self.load_to_release_labels_map: dict[str, set[str]] = {}
         self.prepare_load_to_release_labels_map()
 
-    def prepare_load_to_release_labels_map(self):
+    def prepare_load_to_release_labels_map(self) -> None:
         for label, strategy in self.release_strategy_map.items():
             for tensor_info in strategy:
                 self.tensor_id_to_release_label[tensor_info.tensor_id] = label
@@ -798,7 +804,7 @@ class TensorStrategyLoader(Loader):
             tensor_id = tensor_info.tensor_id
             self.transfer_events[tensor_id] = event
 
-    def release_for_label(self, label):
+    def release_for_label(self, label: str) -> None:
         release_strategy = self.release_strategy_map[label]
         for tensor_info in release_strategy:
             if tensor_info.tensor_id in self.cpu_to_gpu_map:
@@ -811,7 +817,7 @@ class TensorStrategyLoader(Loader):
                 self.del_tensor(gpu_tensor)
                 del self.cpu_to_gpu_map[tensor_info.tensor_id]
 
-    def release_memory(self):
+    def release_memory(self) -> None:
         if not self.release_tensors:
             return
         labels_passed = []
@@ -846,17 +852,17 @@ class TensorStrategyLoader(Loader):
         else:
             self.release_memory_with_stream_synchronize(label)
 
-    def release_memory_with_events(self, label):
+    def release_memory_with_events(self, label: str) -> None:
         event = torch.cuda.Event()
         event.record(torch.cuda.current_stream())
         self.release_memory()
         self.scheduled_releases[str(label)] = event
 
-    def release_memory_with_stream_synchronize(self, label):
+    def release_memory_with_stream_synchronize(self, label: str) -> None:
         torch.cuda.current_stream().synchronize()
         self.release_for_label(label)
 
-    def get(self, tensor_id):
+    def get(self, tensor_id: int) -> torch.Tensor | None:
         if tensor_id in self.transfer_events:
             event = self.transfer_events[tensor_id]
             torch.cuda.current_stream().wait_event(event)
@@ -898,12 +904,12 @@ class TensorStrategyLoader(Loader):
 class RawBlockController:
     def __init__(
         self,
-        label_to_size_map,
-        block_sizes,
-        device_gpu,
-        tensors_map,
-        strategy_map,
-        label_to_block_id,
+        label_to_size_map: dict[str, int],
+        block_sizes: dict[int, int],
+        device_gpu: torch.device,
+        tensors_map: Mapping[int, torch.Tensor],
+        strategy_map: dict[str, list[TensorStatistics]],
+        label_to_block_id: dict[str, int],
         *,
         host_pinner: HostPinner,
         release_tensor_memory: bool = True,
@@ -969,21 +975,25 @@ class RawBlockController:
 
         self.prepare_tensor_id_to_view_mapping()
 
-    def prepare_tensor_id_to_view_mapping(self):
-        self.label_to_tensor_views_map = {}
+    def prepare_tensor_id_to_view_mapping(self) -> None:
+        self.label_to_tensor_views_map: dict[str, list[torch.Tensor]] = {}
         for label, meta in self.block_meta_map.items():
             block_id = self.label_to_block_id[label]
             gpu_block = self.block_map_gpu[block_id]
             tensor_views = self.reconstruct_original_shapes(gpu_block, meta)
             self.label_to_tensor_views_map[label] = tensor_views
 
-        self.tensor_id_to_view_map = {}
+        self.tensor_id_to_view_map: dict[int, torch.Tensor] = {}
         for label, views in self.label_to_tensor_views_map.items():
             tensor_ids = self.label_to_cpu_tensor_id_map[label]
             for tensor_id, view in zip(tensor_ids, views, strict=False):
                 self.tensor_id_to_view_map[tensor_id] = view
 
-    def combine_tensors(self, tensors, combined):
+    def combine_tensors(
+        self,
+        tensors: list[torch.Tensor],
+        combined: torch.Tensor,
+    ) -> list[tuple[int, int, torch.Size, torch.dtype, tuple[int, ...]]]:
         metadata = []
         current_idx = 0
         for tensor in tensors:
@@ -1005,7 +1015,7 @@ class RawBlockController:
                 # memory layout is preserved in the combined block.
                 offset_bytes = tensor.storage_offset() * element_size
                 byte_tensor = torch.empty(0, dtype=torch.uint8, device=tensor.device)
-                byte_tensor.set_(tensor.untyped_storage(), offset_bytes, (nbytes,))
+                byte_tensor.set_(tensor.untyped_storage(), offset_bytes, (nbytes,))  # type: ignore[call-overload]
             else:
                 # Non-dense with gaps: copy to contiguous layout first.
                 contig = tensor.contiguous()
@@ -1048,10 +1058,10 @@ class RawBlockController:
 
         return reconstructed
 
-    def get_tensor_id_to_view_mapping(self):
+    def get_tensor_id_to_view_mapping(self) -> dict[int, torch.Tensor]:
         return self.tensor_id_to_view_map
 
-    def schedule_transfer(self, label, non_blocking=True):
+    def schedule_transfer(self, label: str, non_blocking: bool = True) -> None:
         cpu_block = self.block_map_cpu[label]
         gpu_block_view = self.gpu_block_view_map[label]
         gpu_block_view.copy_(cpu_block, non_blocking=non_blocking)
@@ -1152,7 +1162,7 @@ class AllocationBlockController:
                     strategy = strategy_map[label]
                     if len(strategy) == 0:
                         continue
-                    if self.use_shm and label not in self.shm_block_name_map:
+                    if shm_prefix is not None and label not in self.shm_block_name_map:
                         self.shm_block_name_map[label] = shm_prefix
                     block = allocation_manager.block()
                     # Record ownership before allocation or map publication:
@@ -1340,17 +1350,17 @@ class AllocationBlockController:
             device_str += ":" + str(device_gpu.index)
         return device_str
 
-    def prepare_tensor_id_to_view_mapping(self):
+    def prepare_tensor_id_to_view_mapping(self) -> None:
         self.tensor_id_to_view_map = {}
         for label, views in self.label_to_tensor_views_map.items():
             tensor_ids = self.label_to_cpu_tensor_id_map[label]
             for tensor_id, view in zip(tensor_ids, views, strict=False):
                 self.tensor_id_to_view_map[tensor_id] = view
 
-    def get_tensor_id_to_view_mapping(self):
+    def get_tensor_id_to_view_mapping(self) -> dict[int, torch.Tensor]:
         return self.tensor_id_to_view_map
 
-    def schedule_transfer(self, label, non_blocking=True):
+    def schedule_transfer(self, label: str, non_blocking: bool = True) -> None:
         cpu_block = self.block_map_cpu[label]
         gpu_block_view = self.gpu_block_view_map[label]
         cpu_block.copy_to(gpu_block_view, non_blocking=non_blocking)
@@ -1478,7 +1488,7 @@ class PreallocatedBatchTransferTensorLoader(PreallocatedLoader):
             piecewise_prefetch_policy=piecewise_prefetch_policy,
         )
         self.device_gpu = device_gpu
-        self.cpu_to_gpu_map = {}
+        self.cpu_to_gpu_map: dict[int, torch.Tensor] = {}
 
         self.label_to_block_id = label_to_block_id
         self.transfer_to_compute_map = transfer_to_compute_map
@@ -1512,7 +1522,7 @@ class PreallocatedBatchTransferTensorLoader(PreallocatedLoader):
             block_id = self.label_to_block_id[label]
             self._transfer_runtime.submit(
                 block_id,
-                lambda label=label: self.allocation_controller.schedule_transfer(label),
+                partial(self.allocation_controller.schedule_transfer, label),
                 trace_label=f"schedule={label} consume={self.transfer_to_compute_map[label]}",
             )
         self._transfer_runtime.join()
@@ -1521,7 +1531,7 @@ class PreallocatedBatchTransferTensorLoader(PreallocatedLoader):
         self.preload()
 
     @_compiler_disable
-    def enter(self, label):
+    def enter(self, label: str) -> None:
         tc = self.offload_timing_collector
         pp = self.piecewise_prefetch_policy
 
@@ -1563,7 +1573,7 @@ class PreallocatedBatchTransferTensorLoader(PreallocatedLoader):
         tc.record_compute_start(label)
 
     @_compiler_disable
-    def exit(self, label):
+    def exit(self, label: str) -> None:
         tc = self.offload_timing_collector
         pp = self.piecewise_prefetch_policy
 
@@ -1640,7 +1650,7 @@ class PreallocatedBatchTransferTensorLoader(PreallocatedLoader):
         if policy_error is not None:
             raise policy_error
 
-    def release_memory(self):
+    def release_memory(self) -> None:
         pass
 
     def shutdown(self) -> None:
@@ -1666,7 +1676,7 @@ class PreallocatedBatchTransferTensorLoaderReordered(PreallocatedLoader):
             piecewise_prefetch_policy=piecewise_prefetch_policy,
         )
         self.device_gpu = device_gpu
-        self.cpu_to_gpu_map = {}
+        self.cpu_to_gpu_map: dict[int, torch.Tensor] = {}
 
         self.label_to_block_id = label_to_block_id
         self.transfer_to_compute_map = transfer_to_compute_map
@@ -1702,7 +1712,7 @@ class PreallocatedBatchTransferTensorLoaderReordered(PreallocatedLoader):
             block_id = self.label_to_block_id[label]
             self._transfer_runtime.submit(
                 block_id,
-                lambda label=label: self.allocation_controller.schedule_transfer(label),
+                partial(self.allocation_controller.schedule_transfer, label),
                 trace_label=f"schedule={label} consume={compute_label}",
             )
             self._preloaded_compute_labels.add(compute_label)
@@ -1712,7 +1722,7 @@ class PreallocatedBatchTransferTensorLoaderReordered(PreallocatedLoader):
         self.preload()
 
     @_compiler_disable
-    def enter(self, label):
+    def enter(self, label: str) -> None:
         tc = self.offload_timing_collector
         pp = self.piecewise_prefetch_policy
 
@@ -1754,7 +1764,7 @@ class PreallocatedBatchTransferTensorLoaderReordered(PreallocatedLoader):
 
         tc.record_compute_start(label)
 
-    def _schedule_block_transfer(self, label) -> None:
+    def _schedule_block_transfer(self, label: str) -> None:
         """Issue the rolling-block H2D transfer for ``label`` on the transfer stream."""
         tc = self.offload_timing_collector
         pp = self.piecewise_prefetch_policy
@@ -1775,7 +1785,7 @@ class PreallocatedBatchTransferTensorLoaderReordered(PreallocatedLoader):
         pp.on_schedule(schedule_label=label, compute_label=compute_label)
 
     @_compiler_disable
-    def exit(self, label):
+    def exit(self, label: str) -> None:
         tc = self.offload_timing_collector
         pp = self.piecewise_prefetch_policy
 
@@ -1840,7 +1850,7 @@ class PreallocatedBatchTransferTensorLoaderReordered(PreallocatedLoader):
         if policy_error is not None:
             raise policy_error
 
-    def release_memory(self):
+    def release_memory(self) -> None:
         pass
 
     def shutdown(self) -> None:

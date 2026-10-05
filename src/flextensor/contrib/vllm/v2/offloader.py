@@ -95,7 +95,7 @@ def _storage_aliases_by_key(
     module: nn.Module,
     storage_keys: set[StageStorageKey],
 ) -> dict[StageStorageKey, list[torch.Tensor]]:
-    aliases_by_storage = {storage_key: [] for storage_key in storage_keys}
+    aliases_by_storage: dict[StageStorageKey, list[torch.Tensor]] = {storage_key: [] for storage_key in storage_keys}
     for tensor in compute_reachable_tensor_map(module).values():
         if tensor.is_meta or tensor.layout != torch.strided:
             continue

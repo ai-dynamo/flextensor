@@ -179,7 +179,7 @@ class IterativeLayerStatisticsCollector:
     def get_union_tensor_ids(self) -> dict[str, set[int]]:
         union_tensor_ids: dict[str, set[int]] = {}
         for label in self.tensor_measurements:
-            union_tensor_ids[label] = set.union(*self.tensor_measurements[label])
+            union_tensor_ids[label] = set[int]().union(*self.tensor_measurements[label])
         return union_tensor_ids
 
     def get_layer_stats(self) -> list[IterativeLayerStatistics]:
@@ -222,6 +222,7 @@ class IterativeLayerStatisticsFilter:
 
         for stats in stats_list:
             # Filter tensor_ids based on their type while preserving structure
+            filtered_tensor_ids: list[int] | set[int]
             if isinstance(stats.tensor_ids, list):
                 # For lists, preserve order and duplicates by filtering each element
                 filtered_tensor_ids = [tensor_id for tensor_id in stats.tensor_ids if tensor_id in tensor_ids_set]
@@ -261,6 +262,7 @@ class IterativeLayerStatisticsFilter:
 
         for stats in stats_list:
             # Filter tensor_ids based on their type while preserving structure
+            filtered_tensor_ids: list[int] | set[int]
             if isinstance(stats.tensor_ids, list):
                 # For lists, preserve order and duplicates by filtering each element
                 filtered_tensor_ids = [tensor_id for tensor_id in stats.tensor_ids if tensor_id not in tensor_ids_set]

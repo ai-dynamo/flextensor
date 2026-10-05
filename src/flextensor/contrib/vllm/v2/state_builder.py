@@ -38,7 +38,7 @@ def resolve_cuda_device(device_gpu: torch.device | str | int) -> torch.device:
     if device.type != "cuda":
         raise VllmFlexTensorV2Error(f"expected a CUDA device, got {device}")
     if device.index is None:
-        return torch.device("cuda", torch.cuda.current_device())
+        return torch.device("cuda", torch.cuda.current_device())  # type: ignore[unreachable]
     return device
 
 

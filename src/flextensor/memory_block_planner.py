@@ -57,7 +57,7 @@ class MemoryBlockPlanner:
         sorted_layers = list(self.layer_sizes.keys())
 
         # Use greedy coloring: assign the smallest available color to each layer
-        colors = {}  # layer -> color (block number)
+        colors: dict[str, int] = {}  # layer -> color (block number)
 
         for layer in sorted_layers:
             # Find the smallest available color that doesn't conflict with neighbours
@@ -94,7 +94,7 @@ class MemoryBlockPlanner:
         sorted_layers = list(self.layer_sizes.keys())
 
         # Initialize blocks
-        blocks = {i: [] for i in range(num_blocks)}
+        blocks: dict[int, list[str]] = {i: [] for i in range(num_blocks)}
 
         # Use a greedy approach: assign each layer to the block that has the fewest layers
         # while respecting adjacency constraints
@@ -137,7 +137,7 @@ class MemoryBlockPlanner:
             raise ValueError(msg)
 
         # Initialize blocks
-        blocks = {i: [] for i in range(num_blocks)}
+        blocks: dict[int, list[str]] = {i: [] for i in range(num_blocks)}
         block_sizes = dict.fromkeys(range(num_blocks), 0)
 
         # Try to allocate layers
