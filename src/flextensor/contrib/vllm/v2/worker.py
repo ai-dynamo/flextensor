@@ -22,6 +22,7 @@ from flextensor.config import BLOCK_TRANSFER_MODES, OffloadConfig, load_config
 from flextensor.contrib.vllm._patterns import (
     resolve_vllm_patterns,
 )
+from flextensor.contrib.vllm.v2.breakable_cudagraph import install_breakable_segment_join
 from flextensor.contrib.vllm.v2.errors import VllmFlexTensorV2Error
 from flextensor.contrib.vllm.v2.offloader import VllmBootstrapOffloader
 from flextensor.offload_timing import OFFLOAD_TIMING_MEASURE_MAX_PASSES
@@ -257,6 +258,7 @@ class FlexTensorOffloadWorker(Worker):
                 )
                 manager_active = True
             _publish_model_to_runner(self.model_runner, raw_model, proxy)
+            install_breakable_segment_join()
             self.model_runner.model_memory_usage += takeover_memory.consumed_memory
             atexit.register(flextensor.release)
             self._flextensor_previous_offloader = previous
