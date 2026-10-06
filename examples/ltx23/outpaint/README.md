@@ -406,6 +406,12 @@ bash /my_home/flex-tensor/examples/ltx23/outpaint/single_serve.sh
 It listens on `127.0.0.1:8020` by default. The CP2/CP4/CP8 workflow below is
 an additional deployment option; it does not replace single-GPU serving.
 
+Like the NGINX helper, it defaults to
+`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` to reduce CUDA memory
+fragmentation for large video workspaces when the variable is unset or empty.
+A nonempty `PYTORCH_CUDA_ALLOC_CONF` is preserved; set it to
+`expandable_segments:False` to disable this default.
+
 CP is fixed for the lifetime of a server. A direct CP4 server uses four processes but exposes HTTP only from rank 0:
 
 ```bash

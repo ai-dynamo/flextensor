@@ -26,6 +26,7 @@ from flextensor.shm import KeepAlive, ProcessFileLock, SemaphoreLock
 
 if TYPE_CHECKING:
     from multiprocessing.queues import Queue
+    from multiprocessing.synchronize import Barrier
     from multiprocessing.synchronize import Event as EventType
 
 
@@ -39,8 +40,11 @@ def create_keepalive_process(
     lock_class: type,
     ready_event: EventType | None = None,
     stop_event: EventType | None = None,
+    start_barrier: Barrier | None = None,
 ) -> None:
     """Helper function to create KeepAlive in a separate process."""
+    if start_barrier is not None:
+        start_barrier.wait()
     try:
         keep_alive = KeepAlive(
             name=name,
@@ -305,6 +309,7 @@ class TestKeepAliveMultiprocess:
         race to create/connect to KeepAlive concurrently."""
         result_queue = multiprocessing.Queue()
         num_processes = 4
+        start_barrier = multiprocessing.Barrier(num_processes + 1, timeout=EVENT_TIMEOUT)
         # Workers must outlive the staleness threshold so a slow-to-register peer
         # isn't seen as stale by the others — derive from keep_alive_seconds so
         # raising the staleness floor in setup_method keeps this test meaningful.
@@ -324,13 +329,17 @@ class TestKeepAliveMultiprocess:
                     worker_duration,
                     lock_class,
                 ),
+                kwargs={"start_barrier": start_barrier},
             )
             processes.append(proc)
 
         try:
             for proc in processes:
                 proc.start()
-                time.sleep(0.02)
+
+            # Let spawn/forkserver imports finish before racing initialization
+            # and starting the bounded worker-exit wait.
+            start_barrier.wait()
 
             for i, proc in enumerate(processes):
                 proc.join(timeout=EVENT_TIMEOUT)

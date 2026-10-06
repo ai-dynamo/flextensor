@@ -464,10 +464,13 @@ def test_setup_installs_local_flextensor_checkout(launcher: Launcher) -> None:
     assert "profile" in launcher.calls("python")[-1]["args"]
 
 
-def test_single_worker_launcher_remains_non_shm(launcher: Launcher) -> None:
-    result = launcher.run("single_serve.sh")
+@pytest.mark.parametrize("allocator", [None, "", "expandable_segments:False", "max_split_size_mb:128"])
+def test_single_worker_launcher_remains_non_shm(launcher: Launcher, allocator: str | None) -> None:
+    overrides = {} if allocator is None else {"PYTORCH_CUDA_ALLOC_CONF": allocator}
+    result = launcher.run("single_serve.sh", **overrides)
     assert result.returncode == 0, result
     workers = launcher.calls("python")
     assert len(workers) == 1
     assert "serve" in workers[0]["args"]
+    assert workers[0]["cuda_alloc_conf"] == (allocator or "expandable_segments:True")
     assert not any(arg.startswith("--shm-") for arg in workers[0]["args"])

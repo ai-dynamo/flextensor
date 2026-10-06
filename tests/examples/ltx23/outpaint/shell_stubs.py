@@ -148,6 +148,7 @@ def main() -> None:
         "parent_pid": os.getppid(),
         "pgid": os.getpgrp(),
         "cuda": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
+        "cuda_alloc_conf": os.environ.get("PYTORCH_CUDA_ALLOC_CONF"),
         "nofile": resource.getrlimit(resource.RLIMIT_NOFILE)[0],
         "rank_dir": os.environ.get("OUTPAINT_RANK_DIR"),
         "numa_policy": os.environ.get("SHELL_TEST_NUMA_POLICY"),
