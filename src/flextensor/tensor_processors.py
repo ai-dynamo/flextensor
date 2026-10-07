@@ -292,23 +292,42 @@ class TensorTypeHandler:
 
 
 class _ReachableContainerTypeHandler:
-    """Read-only traversal that skips values which cannot contain tensors."""
+    """Read-only traversal that skips values which cannot contain tensors.
+
+    A container already being traversed higher up the stack (a dict or list that contains itself) is returned
+    as-is instead of recursing forever.
+    """
 
     _LEAF_TYPES = (types.NoneType, bool, int, float, complex, str, bytes)
+
+    def __init__(self) -> None:
+        self._in_progress: set[int] = set()
 
     def can_handle(self, value: Any) -> bool:
         return isinstance(value, (dict, set)) or type(value) in (list, tuple)
 
     def process_attribute(self, value: dict | list | set | tuple, ctx: ProcessingContext) -> object:
-        values = value.values() if isinstance(value, dict) else value
-        for item in values:
-            if type(item) not in self._LEAF_TYPES:
-                ctx.dispatch(item)
+        value_id = id(value)
+        if value_id in self._in_progress:
+            return value
+        self._in_progress.add(value_id)
+        try:
+            values = value.values() if isinstance(value, dict) else value
+            for item in values:
+                if type(item) not in self._LEAF_TYPES:
+                    ctx.dispatch(item)
+        finally:
+            self._in_progress.discard(value_id)
         return value
 
 
 class _ObjectAttributesTypeHandler:
-    """Read-only traversal of tensor-bearing attributes on plain objects."""
+    """Read-only traversal of tensor-bearing attributes on plain objects.
+
+    Python module objects are namespaces, not model state, and are skipped: an engine object holding a module
+    reference (e.g. SGLang's ``GroupCoordinator.device_module`` set to ``torch.cuda``) would otherwise lead the
+    walk into ``sys.modules`` and every loaded module.
+    """
 
     def __init__(self) -> None:
         self._visited: set[int] = set()
@@ -320,7 +339,7 @@ class _ObjectAttributesTypeHandler:
     def can_handle(self, value: Any) -> bool:
         # CPython type metadata avoids slow static reflection on every dispatched value.
         return (
-            not isinstance(value, (type, torch.Tensor, torch.nn.Module))
+            not isinstance(value, (type, types.ModuleType, torch.Tensor, torch.nn.Module))
             and getattr(type(value), "__dictoffset__", 0) != 0
         )
 

@@ -5,6 +5,8 @@
 
 import collections
 import dataclasses
+import sys
+import types
 from types import SimpleNamespace
 
 import pytest
@@ -480,6 +482,47 @@ class TestReachableTensorMapProcessor:
         )
 
         assert tensor_processors._ObjectAttributesTypeHandler().can_handle(Holder(torch.zeros(1)))
+
+    def test_skips_python_module_objects(self) -> None:
+        """A module reference on an engine object must not lead the walk into ``sys.modules``.
+
+        SGLang stores ``pp_group`` (a ``GroupCoordinator``) on the model, and its
+        ``device_module`` is the ``torch.cuda`` module.
+        """
+        namespace = types.ModuleType("fake_device_module")
+        namespace.tensor = torch.zeros(1)
+        namespace.sys = sys
+        m = nn.Module()
+        m.w = nn.Parameter(torch.zeros(2))
+        m.pp_group = types.SimpleNamespace(device_module=namespace)
+
+        ids = compute_reachable_tensor_ids(m)
+
+        assert id(m.w) in ids
+        assert id(namespace.tensor) not in ids
+
+    def test_self_referential_dict_attribute(self) -> None:
+        """A dict that contains itself (like a module's ``globals()``) does not recurse forever."""
+        tensor = torch.zeros(3)
+        cyclic: dict[str, object] = {"tensor": tensor}
+        cyclic["self"] = cyclic
+        m = nn.Module()
+        m.cyclic = cyclic
+
+        ids = compute_reachable_tensor_ids(m)
+
+        assert id(tensor) in ids
+
+    def test_self_referential_list_attribute(self) -> None:
+        tensor = torch.zeros(3)
+        cyclic: list[object] = [tensor]
+        cyclic.append(cyclic)
+        m = nn.Module()
+        m.cyclic = cyclic
+
+        ids = compute_reachable_tensor_ids(m)
+
+        assert id(tensor) in ids
 
 
 class TestMoveBuffersToGPUTensorProcessor:

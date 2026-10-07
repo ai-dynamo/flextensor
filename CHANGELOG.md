@@ -86,6 +86,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and return `0` instead of restarting measurement.
 - Support offloading models that cache tensor views in nested objects.
 - Support offloading models with broadcast or expanded tensor weights.
+- Fix `RecursionError` when scanning a model for reachable tensors whose
+  attributes reference a Python module (such as `torch.cuda`) or a dict or list
+  that contains itself. Python modules are no longer scanned.
 
 ## [0.4.0] — 2026-08-17
 
