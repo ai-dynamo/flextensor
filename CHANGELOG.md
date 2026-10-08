@@ -54,6 +54,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Register pinned SHM mappings through `torch.cuda.cudart()` with portable host
   registration; CuPy is no longer required.
 
+### Deprecated
+
+- Legacy/v1 FlexTensor vLLM worker — use worker v2 by unsetting
+  `FT_VLLM_USE_V2_WORKER` or setting it to `1`. Will be removed in v0.6.0.
+
 ### Fixed
 
 - Preserve hidden model modules during offloading; avoid missing-attribute crashes.

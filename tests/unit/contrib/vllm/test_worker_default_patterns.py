@@ -97,6 +97,11 @@ def worker_module():
                 sys.modules[name] = mod
 
 
+def test_legacy_worker_warns_on_construction(worker_module) -> None:
+    with pytest.warns(DeprecationWarning, match=r"legacy/v1.*worker v2.*FT_VLLM_USE_V2_WORKER.*v0\.6\.0"):
+        worker_module.FlexTensorOffloadWorker()
+
+
 class TestVllmDefaultPatternUpdates:
     """vLLM worker defaults must be layer-focused and MoE-safe."""
 

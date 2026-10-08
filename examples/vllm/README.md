@@ -10,6 +10,10 @@ model state after vLLM loads the model, places model weights according to a
 FlexTensor offloading strategy, and can refresh an offload profile from serving
 traffic.
 
+The legacy/v1 worker (`FT_VLLM_USE_V2_WORKER=0`) is deprecated and will be
+removed in v0.6.0. Unset `FT_VLLM_USE_V2_WORKER` or set it to `1` to use worker
+v2 with the same public worker class path.
+
 `serve.sh` forwards every argument after the model name to `vllm serve`. This
 tutorial leaves model-specific vLLM settings at their defaults.
 

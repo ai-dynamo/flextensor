@@ -19,6 +19,7 @@ from contextlib import contextmanager
 from typing import Any, cast
 
 import psutil
+from typing_extensions import deprecated
 from vllm.utils.mem_constants import GiB_bytes
 from vllm.v1.worker.gpu_worker import Worker
 
@@ -289,10 +290,19 @@ def vllm_model_context(model_runner: Any) -> Any:
             model_runner.model = model_container[0]
 
 
+@deprecated(
+    "The legacy/v1 FlexTensor vLLM worker is deprecated. "
+    "Use worker v2 instead by unsetting FT_VLLM_USE_V2_WORKER or setting it to '1'. "
+    "Will be removed in v0.6.0."
+)
 class FlexTensorOffloadWorker(Worker):
     """vLLM Worker with FlexTensor offloading support.
 
     Applies tensor offloading after model loading when FT_ENABLED=1.
+
+    .. deprecated:: v0.5.0
+        Use worker v2 by unsetting ``FT_VLLM_USE_V2_WORKER`` or setting it to
+        ``1``. The legacy/v1 worker will be removed in v0.6.0.
     """
 
     _ft_compile_gated_modules: list[Any] | None
