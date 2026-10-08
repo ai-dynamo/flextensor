@@ -592,7 +592,10 @@ class TensorProcessor:
         if hasattr(model, "__dict__"):
             ctx = ProcessingContext(self)
             for attr_name, attr_value in model.__dict__.items():
-                updated_attributes[attr_name] = ctx.dispatch(attr_value)
+                new_value = ctx.dispatch(attr_value)
+                # Reassigning unchanged values can register deliberately hidden nn.Modules.
+                if new_value is not attr_value:
+                    updated_attributes[attr_name] = new_value
 
         if self.update_attributes:
             for key, value in updated_attributes.items():

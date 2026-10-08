@@ -42,6 +42,33 @@ def test_disable_requires_grad_skips_non_leaf_views() -> None:
     assert model.view.requires_grad is True
 
 
+@pytest.mark.parametrize("has_hidden_module", [False, True])
+def test_tensor_processor_preserves_stage_missing_layer(has_hidden_module: bool) -> None:
+    class StageMissingLayer(nn.Module):
+        """The storage and lookup behavior of vLLM's StageMissingLayer."""
+
+        def __init__(self, module: nn.Module | None) -> None:
+            super().__init__()
+            self.__dict__["module"] = module
+
+        def __getattr__(self, name: str):
+            return getattr(self.__dict__["module"], name)
+
+    tower = nn.Module() if has_hidden_module else None
+    missing_layer = StageMissingLayer(tower)
+    model = nn.Module()
+    model.visual = missing_layer
+
+    assert getattr(missing_layer, "quant_method", None) is None
+
+    TensorProcessor().apply(model)
+
+    # vLLM kernel warmup probes each module after offloader takeover.
+    assert getattr(missing_layer, "quant_method", None) is None
+    assert missing_layer.__dict__["module"] is tower
+    assert "module" not in missing_layer._modules
+
+
 class TestTensorMappingProcessor:
     """Test cases for TensorMappingProcessor to ensure only nn.Parameters are tracked."""
 
