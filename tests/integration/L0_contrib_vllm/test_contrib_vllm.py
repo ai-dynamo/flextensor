@@ -167,6 +167,11 @@ class TestContribVLLM:
     @pytest.mark.usefixtures("device_gpu")
     def test_v2_allocation_eager_serves_and_reduces_memory(self, baseline_result, test_output_dir: Path) -> None:
         baseline_memory, _, _ = baseline_result
+        assert baseline_memory.weights_memory_gib is not None
+        # Force weight offloading even when the runner has enough VRAM for the entire model.
+        gpu_memory_fraction = (
+            0.5 * baseline_memory.weights_memory_gib * 1024**3 / torch.cuda.get_device_properties(0).total_memory
+        )
         case = (
             VllmOffloadSmokeCase(
                 model_name=QWEN_MODEL,
@@ -176,7 +181,7 @@ class TestContribVLLM:
             .with_flextensor_offload()
             .with_env_vars(
                 ("FT_TRANSFER_MODE", "allocation_block_transfer"),
-                ("FT_MAX_GPU_MEM_FRACTION", "0.3"),
+                ("FT_MAX_GPU_MEM_FRACTION", str(gpu_memory_fraction)),
             )
         )
 
@@ -186,7 +191,6 @@ class TestContribVLLM:
             correctness_check=QWEN_CORRECTNESS,
         )
 
-        assert baseline_memory.weights_memory_gib is not None
         assert memory.weights_memory_gib is not None
         assert 0 < memory.weights_memory_gib < baseline_memory.weights_memory_gib
         assert any("FlexTensor vLLM integration v2 state takeover complete" in line for line in log_lines)
