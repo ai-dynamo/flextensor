@@ -117,6 +117,12 @@ addopts = [
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "gpu_count_1: Test requires one visible GPU",
+    "gpu_count_2: Test requires two visible GPUs",
+    "gpu_count_4: Test requires four visible GPUs",
+    "gpu_count_min_1: Test requires at least one visible GPU",
+    "gpu_count_min_2: Test requires at least two visible GPUs",
+    "gpu_count_min_4: Test requires at least four visible GPUs",
     "gpu_vram_24g: Test requires exact 24GB GPU VRAM runner",
     "gpu_vram_40g: Test requires exact 40GB GPU VRAM runner",
     "gpu_vram_48g: Test requires exact 48GB GPU VRAM runner",

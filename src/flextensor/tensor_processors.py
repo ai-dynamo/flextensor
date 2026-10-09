@@ -778,8 +778,9 @@ class MoveBuffersToGPUTensorProcessor(TensorProcessor):
 class TensorReplacementProcessor(TensorProcessor):
     """Replace mapped tensors, preserving meta Parameter subclasses.
 
-    ``parameter_factory`` can reconstruct meta parameters whose subclasses
-    require constructor arguments beyond ``data`` and ``requires_grad``.
+    Meta parameters are rebound without rerunning subclass constructors, with
+    their instance attributes preserved. ``parameter_factory`` can override
+    this for subclasses requiring custom reconstruction.
     """
 
     def __init__(
@@ -811,19 +812,20 @@ class TensorReplacementProcessor(TensorProcessor):
         new_tensor = self.tensor_id_mapping[src_tensor_id]
         if src.is_meta:
             if isinstance(src, torch.nn.parameter.Parameter):
-                # The helper leaves existing Parameters unchanged. Unwrap a
-                # mapped Parameter so the source subtype and grad flag win.
+                # Unwrap a mapped Parameter so the source subtype and grad flag win.
                 new_data = new_tensor.detach() if isinstance(new_tensor, torch.nn.Parameter) else new_tensor
-                new_tensor = cast(
-                    "torch.Tensor",
-                    preserve_parameter_type(src, new_data, force_update=True, parameter_factory=self.parameter_factory),
-                )
-        elif self.update_nn_parameters:
-            if isinstance(src, torch.nn.parameter.Parameter):
+                if self.parameter_factory is not None:
+                    new_tensor = self.parameter_factory(src, new_data)
+                else:
+                    # Constructors such as vLLM's require metadata beyond data.
+                    new_tensor = torch.nn.Parameter.__new__(type(src), new_data, requires_grad=src.requires_grad)
+                    new_tensor.__dict__.update(src.__dict__)
+        elif isinstance(src, torch.nn.parameter.Parameter):
+            if self.update_nn_parameters:
                 src.data = new_tensor
                 new_tensor = src
-        elif isinstance(src, torch.nn.parameter.Parameter):
-            new_tensor = torch.nn.parameter.Parameter(data=new_tensor, requires_grad=src.requires_grad)
+            else:
+                new_tensor = torch.nn.parameter.Parameter(data=new_tensor, requires_grad=src.requires_grad)
 
         self._process_inner_fields(src, new_tensor)
 

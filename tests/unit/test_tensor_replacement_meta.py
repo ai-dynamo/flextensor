@@ -140,6 +140,50 @@ def test_non_meta_parameter_keeps_existing_in_place_behavior() -> None:
     assert result.untyped_storage().data_ptr() == mapped.untyped_storage().data_ptr()
 
 
+def test_manager_materializes_parameter_with_required_constructor_metadata() -> None:
+    class _ShardedParameter(nn.Parameter):
+        def __new__(cls, data, **kwargs):
+            return super().__new__(cls, data, requires_grad=False)
+
+        def __init__(self, input_dim, *, data, weight_loader):
+            self._input_dim = input_dim
+            self._weight_loader = weight_loader
+
+        @property
+        def input_dim(self):
+            return self._input_dim
+
+        @property
+        def weight_loader(self):
+            return self._weight_loader
+
+    loader = Mock()
+    source = _ShardedParameter(data=torch.empty((2, 3), device="meta"), input_dim=1, weight_loader=loader)
+    model = nn.Module()
+    model.left = model.right = source
+    mapped = torch.arange(12.0).as_strided((2, 3), (1, 2), storage_offset=3)
+    manager = TensorManager.__new__(TensorManager)
+    manager.device_gpu = torch.device("cpu")
+    manager.tensors_map = {id(source): source}
+    manager.tensor_id_to_name_map = {id(source): "left"}
+
+    manager._prepare_view_model_from_id_to_view_map(model, {id(source): mapped})
+
+    result = model.left
+    assert type(result) is _ShardedParameter
+    assert result is model.right
+    assert result is manager.tensors_map[id(source)]
+    assert result is not source
+    assert source.is_meta
+    assert not result.requires_grad
+    assert result.input_dim == 1
+    assert result.weight_loader is loader
+    assert result.stride() == mapped.stride()
+    assert result.storage_offset() == mapped.storage_offset()
+    assert result.untyped_storage().data_ptr() == mapped.untyped_storage().data_ptr()
+    assert torch.equal(result, mapped)
+
+
 def test_meta_replacement_refreshes_old_id_value_for_block_teardown_restore() -> None:
     class _MetaWeight(nn.Module):
         def __init__(self) -> None:

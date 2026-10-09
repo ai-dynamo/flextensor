@@ -7,6 +7,8 @@ from __future__ import annotations
 import multiprocessing
 import os
 import time
+import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -27,6 +29,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from multiprocessing.process import BaseProcess
     from multiprocessing.queues import Queue
+    from multiprocessing.synchronize import Barrier
     from multiprocessing.synchronize import Event as EventType
 
 
@@ -247,8 +250,11 @@ def check_memory_size_process(
     lock_class: type,
     ready_event: EventType | None = None,
     close_event: EventType | None = None,
+    start_barrier: Barrier | None = None,
 ) -> None:
     """Attach (creating or connecting) and report observed segment size."""
+    if start_barrier is not None:
+        start_barrier.wait()
     try:
         if create:
             fsm = FlexibleSharedMemory(name=name, shm_size=expected_size, pinned_memory=False, lock_class=lock_class)
@@ -372,7 +378,8 @@ def cleanup_flexible_shared_memory(name: str) -> None:
     for shm_name in (name, f"sm_{name}_kd", f"{name}_km"):
         unlink_shared_memory_if_present(shm_name)
     for sem_name in (name, f"{name}_ks"):
-        unlink_semaphore_if_present(sem_name)
+        unlink_semaphore_if_present(f"/{sem_name}")
+        Path(ProcessFileLock.resolve_path(sem_name)).unlink(missing_ok=True)
 
 
 class TestFlexibleSharedMemoryMultiprocess:
@@ -380,7 +387,7 @@ class TestFlexibleSharedMemoryMultiprocess:
 
     def setup_method(self):
         """Setup test fixtures before each test method."""
-        self.test_name = "fsm_mp"  # Short name to avoid POSIX name limits
+        self.test_name = f"fsm_mp_{uuid.uuid4().hex[:8]}"
         self.test_size = 8192
         cleanup_flexible_shared_memory(self.test_name)
 
@@ -433,6 +440,54 @@ class TestFlexibleSharedMemoryMultiprocess:
         finally:
             creator_close.set()
             for proc in [creator_proc, reader_proc]:
+                if proc.is_alive():
+                    proc.terminate()
+                    proc.join(timeout=EVENT_TIMEOUT)
+
+    @pytest.mark.parametrize("lock_class", [SemaphoreLock, ProcessFileLock])
+    def test_concurrent_creation(self, lock_class):
+        """Simultaneous create-or-connect calls must share one initialized block."""
+        result_queue = multiprocessing.Queue()
+        num_processes = 4
+        start_barrier = multiprocessing.Barrier(num_processes + 1, timeout=EVENT_TIMEOUT)
+        ready_events = [multiprocessing.Event() for _ in range(num_processes)]
+        close_event = multiprocessing.Event()
+        processes = [
+            multiprocessing.Process(
+                target=check_memory_size_process,
+                args=(self.test_name, self.test_size, result_queue, True, lock_class),
+                kwargs={
+                    "start_barrier": start_barrier,
+                    "ready_event": ready_events[i],
+                    "close_event": close_event,
+                },
+            )
+            for i in range(num_processes)
+        ]
+
+        try:
+            for proc in processes:
+                proc.start()
+            start_barrier.wait()
+            for i, event in enumerate(ready_events):
+                wait_for_event(event, f"concurrent creator {i} initialization", proc=processes[i])
+
+            # Keep every mapping open until all workers attach, preventing a
+            # close/recreate cycle from masquerading as concurrent creation.
+            close_event.set()
+            for i, proc in enumerate(processes):
+                proc.join(timeout=EVENT_TIMEOUT)
+                assert_clean_exit(proc, f"concurrent creator {i}")
+
+            results = drain_results(result_queue, expected_count=num_processes)
+            assert all(r["success"] for r in results), f"Failed: {format_failed_results(results)}"
+            assert sum(r["shm_creator"] for r in results) == 1
+            sizes = {r["actual_size"] for r in results}
+            assert len(sizes) == 1
+            assert sizes.pop() >= self.test_size
+        finally:
+            close_event.set()
+            for proc in processes:
                 if proc.is_alive():
                     proc.terminate()
                     proc.join(timeout=EVENT_TIMEOUT)

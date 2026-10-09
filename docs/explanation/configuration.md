@@ -384,7 +384,8 @@ A stable model identity can first be converted with
 
 When `shm_wait_timeout` is `0.0` (the default), the lower-level path has no overall
 wait limit. `SharedOffloadSession` defaults to 300 seconds and also accepts
-`wait_timeout=0.0` for no overall limit. Both paths check the creator heartbeat
+`wait_timeout=0.0` for no overall limit. vLLM worker v2 passes through
+`shm_wait_timeout`, including its zero default. Both paths check the creator heartbeat
 while initialization is in progress. Positive timeouts also bound coordination-lock
 acquisition; scheduler delays can make measured elapsed time slightly longer
 than the configured value.
@@ -443,6 +444,14 @@ finish and rejects new setup. The coordinator's own lock remains stable across n
 registered buffers separately from offloaded allocation blocks. Followers validate
 the manifest's dtype, shape, stride, and byte ranges before copying tensors to
 their target device. Tied registrations and buffer persistence are preserved.
+
+!!! note "vLLM worker-v2 local data parallelism"
+    For its supported single-node local `mp` topology, vLLM worker v2 owns the
+    `SharedOffloadSession` lifecycle. The SHM path requires vLLM 0.17.0 or
+    later and a compatible read-only profile. It uses the same compilation and
+    CUDA-graph checks as the regular worker. See the
+    [vLLM example](../../examples/vllm/README.md#share-weights-across-local-data-parallel-workers)
+    for the DP=2 workflow and complete support envelope.
 
 ### Profiling Configuration
 

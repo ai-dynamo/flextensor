@@ -14,6 +14,136 @@ from flextensor.contrib.vllm._patterns import VLLM_DEFAULT_EXCLUDE_PATTERNS, VLL
 from ._v2_worker_test_utils import _install_bootstrap_fakes, _worker
 
 
+def _valid_shm_inputs(worker_module, profile_dir):
+    vllm_config = worker_module.VllmConfig(
+        compilation_config=SimpleNamespace(
+            mode=worker_module.CompilationMode.NONE,
+            cudagraph_mode=worker_module.CUDAGraphMode.NONE,
+        ),
+        load_config=SimpleNamespace(load_format="auto"),
+        lora_config=None,
+        model_config=SimpleNamespace(
+            architecture="Qwen2ForCausalLM",
+            architectures=["Qwen2ForCausalLM"],
+            convert_type="none",
+            quantization=None,
+            runner_type="generate",
+        ),
+        parallel_config=SimpleNamespace(
+            data_parallel_backend="mp",
+            data_parallel_external_lb=False,
+            data_parallel_hybrid_lb=False,
+            data_parallel_index=0,
+            data_parallel_rank_local=0,
+            data_parallel_size=1,
+            data_parallel_size_local=1,
+            decode_context_parallel_size=1,
+            enable_elastic_ep=False,
+            enable_ep_weight_filter=False,
+            enable_eplb=False,
+            enable_expert_parallel=False,
+            nnodes=1,
+            pipeline_parallel_size=1,
+            prefill_context_parallel_size=1,
+            tensor_parallel_size=1,
+            use_ubatching=False,
+        ),
+        speculative_config=None,
+    )
+    offload_config = OffloadConfig(
+        profile_storage_dir=str(profile_dir),
+        profile_read_only=True,
+        transfer_mode="allocation_block_transfer",
+        shm_enabled=True,
+        shm_namespace="vllm-test-run",
+        shm_wait_timeout=30,
+        pinned_memory=False,
+    )
+    return vllm_config, offload_config
+
+
+def _set_nested_attribute(root, path: str, value) -> None:
+    owner = root
+    parts = path.split(".")
+    for part in parts[:-1]:
+        owner = getattr(owner, part)
+    setattr(owner, parts[-1], value)
+
+
+def test_shm_worker_accepts_dense_local_dp_fields_after_vllm_resets_sizes(
+    worker_module,
+    tmp_path,
+) -> None:
+    vllm_config, offload_config = _valid_shm_inputs(worker_module, tmp_path)
+
+    worker_module._validate_shm_worker(vllm_config, offload_config)
+
+
+def test_shm_worker_accepts_other_model_architectures(
+    worker_module,
+    tmp_path,
+) -> None:
+    vllm_config, offload_config = _valid_shm_inputs(worker_module, tmp_path)
+    vllm_config.model_config.architecture = "LlamaForCausalLM"
+    vllm_config.model_config.architectures = ("LlamaForCausalLM",)
+
+    worker_module._validate_shm_worker(vllm_config, offload_config)
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "match"),
+    [
+        ("model_config.runner_type", "pooling", "unconverted generation"),
+        ("model_config.convert_type", "embed", "unconverted generation"),
+        ("model_config.quantization", "fp8", "quantization"),
+        ("lora_config", object(), "LoRA"),
+        ("speculative_config", object(), "speculative"),
+        ("parallel_config.tensor_parallel_size", 2, "TP=1 and PP=1"),
+        ("parallel_config.pipeline_parallel_size", 2, "TP=1 and PP=1"),
+        ("parallel_config.prefill_context_parallel_size", 2, "PCP=1 and DCP=1"),
+        ("parallel_config.decode_context_parallel_size", 2, "PCP=1 and DCP=1"),
+        ("parallel_config.data_parallel_backend", "ray", "single-node"),
+        ("parallel_config.nnodes", 2, "single-node"),
+        ("parallel_config.data_parallel_external_lb", True, "external or hybrid"),
+        ("parallel_config.data_parallel_hybrid_lb", True, "external or hybrid"),
+        ("parallel_config.enable_expert_parallel", True, "expert parallelism"),
+        ("load_config.load_format", "safetensors", "load_format='auto'"),
+    ],
+)
+def test_shm_worker_rejects_unsupported_vllm_topology(
+    worker_module,
+    tmp_path,
+    path,
+    value,
+    match,
+) -> None:
+    vllm_config, offload_config = _valid_shm_inputs(worker_module, tmp_path)
+    _set_nested_attribute(vllm_config, path, value)
+
+    with pytest.raises(worker_module.VllmFlexTensorV2Error, match=match):
+        worker_module._validate_shm_worker(vllm_config, offload_config)
+
+
+@pytest.mark.parametrize(
+    ("updates", "match"),
+    [
+        ({"profile_read_only": False}, "PROFILE_READ_ONLY"),
+        ({"profile_storage_dir": None}, "PROFILE_STORAGE_DIR"),
+    ],
+)
+def test_shm_worker_rejects_unsupported_flextensor_config(
+    worker_module,
+    tmp_path,
+    updates,
+    match,
+) -> None:
+    vllm_config, offload_config = _valid_shm_inputs(worker_module, tmp_path)
+    offload_config = offload_config.model_copy(update=updates)
+
+    with pytest.raises(worker_module.VllmFlexTensorV2Error, match=match):
+        worker_module._validate_shm_worker(vllm_config, offload_config)
+
+
 def test_timing_batch_env_is_registered_and_validated(worker_module, monkeypatch) -> None:
     from flextensor.config import _REGISTERED_ENV_VARS
 

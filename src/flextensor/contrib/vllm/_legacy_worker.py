@@ -311,6 +311,11 @@ class FlexTensorOffloadWorker(Worker):
         """Load model with optional FlexTensor offloading."""
         # Create offload config using the device set by init_device()
         offload_config = load_config(gpu_device=self.device.index)
+        if offload_config.shm_enabled:
+            raise RuntimeError(
+                "The legacy vLLM worker does not support OffloadConfig.shm_enabled=True; "
+                "use worker v2 (FT_VLLM_USE_V2_WORKER=1)."
+            )
         config_updates = _vllm_config_updates(offload_config)
         self._offload_config = offload_config.model_copy(update=config_updates)
         if self._offload_config.enabled:

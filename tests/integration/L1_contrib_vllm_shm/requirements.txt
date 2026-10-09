@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Model under test: https://huggingface.co/Qwen/Qwen2.5-7B-Instruct
+# Minimum version validated by the DP=2 SHM acceptance test: https://github.com/vllm-project/vllm/tree/v0.17.0/vllm/model_executor/model_loader
+vllm>=0.17.0
+requests~=2.32

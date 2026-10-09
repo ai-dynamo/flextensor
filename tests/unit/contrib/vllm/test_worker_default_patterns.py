@@ -102,6 +102,23 @@ def test_legacy_worker_warns_on_construction(worker_module) -> None:
         worker_module.FlexTensorOffloadWorker()
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_legacy_worker_rejects_shm_before_model_loading(worker_module, monkeypatch, enabled) -> None:
+    worker = worker_module.FlexTensorOffloadWorker()
+    worker.device = SimpleNamespace(index=0)
+    monkeypatch.setattr(
+        worker_module,
+        "load_config",
+        lambda **_kwargs: SimpleNamespace(enabled=enabled, shm_enabled=True),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"legacy vLLM worker.*OffloadConfig\.shm_enabled=True.*FT_VLLM_USE_V2_WORKER=1",
+    ):
+        worker.load_model()
+
+
 class TestVllmDefaultPatternUpdates:
     """vLLM worker defaults must be layer-focused and MoE-safe."""
 

@@ -347,6 +347,26 @@ class VllmBootstrapOffloader(_VllmBaseOffloader):
                 flextensor.release()
             raise
 
+    def bind_shared_runtime(self, proxy: nn.Module) -> None:
+        """Adopt the runtime manager initialized by a shared offload session."""
+        if self._runtime_manager is not None:
+            raise VllmFlexTensorV2Error("runtime takeover already completed")
+        self.post_init()
+        manager = getattr(proxy, "offload_manager", None)
+        if not isinstance(manager, OffloadManager):
+            raise VllmFlexTensorV2Error("shared offload proxy did not expose an OffloadManager")
+
+        state = manager._export_runtime_state()  # noqa: SLF001 - shared-session runtime adoption boundary.
+        self._runtime_manager = manager
+        self._runtime_state = state
+        self._state_built = True
+        self._live_units.clear()
+        self._staged_parameter_ids.clear()
+        self._staged_storages.clear()
+        self._staged_storage_sources.clear()
+        self._pending_deferred_callbacks.clear()
+        LOGGER.info("FlexTensor vLLM integration v2 state takeover installed loader_type=%s", state.loader_type)
+
     @property
     def runtime_state(self) -> TensorManagerState:
         if self._runtime_state is None:

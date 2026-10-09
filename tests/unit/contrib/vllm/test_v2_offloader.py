@@ -396,6 +396,66 @@ def test_takeover_adopts_state_retains_manager_and_clears_bootstrap_storage(
     assert "state takeover installed loader_type=raw_block_transfer" in caplog.text
 
 
+def test_bind_shared_runtime_adopts_live_state_and_clears_bootstrap_refs(
+    bootstrap_module,
+    caplog,
+    monkeypatch,
+) -> None:
+    offloader = bootstrap_module.VllmBootstrapOffloader()
+    offloader.wrap_modules(iter([nn.Module()]))
+    storage_key = (torch.device("cpu"), 1, 4)
+    offloader._staged_parameter_ids.add(1)
+    offloader._staged_storages[storage_key] = torch.ones(1)
+    offloader._staged_storage_sources[storage_key] = object()
+    offloader._pending_deferred_callbacks[0, 0] = set()
+    state = TensorManagerState(
+        loader_type="allocation_block_transfer",
+        tensor_id_to_name_map={},
+        allocation_ordered={},
+        label_to_size_map={},
+        block_sizes={},
+        load_strategy={},
+        release_strategy={},
+        label_to_block_id={},
+        stats=[],
+        transfer_to_compute_map={},
+        view_tensors_ids=[],
+        view_tensors_names=[],
+        gpu_tensors_names=[],
+        shm_block_name_map={},
+    )
+    manager = _RecordingOffloadManager()
+    monkeypatch.setattr(manager, "_export_runtime_state", lambda: state)
+    proxy = nn.Module()
+    proxy.offload_manager = manager
+
+    with caplog.at_level(logging.INFO, logger=bootstrap_module.LOGGER.name):
+        offloader.bind_shared_runtime(proxy)
+    offloader.sync_prev_onload()
+    offloader.join_after_forward()
+
+    assert offloader._runtime_manager is manager
+    assert offloader.runtime_state is state
+    assert offloader._state_built
+    assert offloader._live_units == []
+    assert offloader._staged_parameter_ids == set()
+    assert offloader._staged_storages == {}
+    assert offloader._staged_storage_sources == {}
+    assert offloader._pending_deferred_callbacks == {}
+    assert manager.runtime_calls == ["sync_prev_onload", "join_after_forward"]
+    assert "state takeover installed loader_type=allocation_block_transfer" in caplog.text
+
+
+def test_bind_shared_runtime_requires_proxy_manager(bootstrap_module) -> None:
+    offloader = bootstrap_module.VllmBootstrapOffloader()
+    offloader.wrap_modules(iter([nn.Module()]))
+
+    with pytest.raises(bootstrap_module.VllmFlexTensorV2Error, match=r"shared offload proxy.*OffloadManager"):
+        offloader.bind_shared_runtime(nn.Module())
+
+    assert offloader._runtime_manager is None
+
+
 def test_runtime_hooks_are_noops_before_takeover(bootstrap_module) -> None:
     offloader = bootstrap_module.VllmBootstrapOffloader()
 

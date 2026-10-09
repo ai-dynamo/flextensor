@@ -127,12 +127,12 @@ def unlink_semaphore_if_present(sem_name: str) -> None:
     leaves a stale resource around that masquerades as a product bug in the
     next test's setup (the very silent-failure shape this suite avoids).
     """
+    sem_name = sem_name if sem_name.startswith("/") else f"/{sem_name}"
     last_exc: BaseException | None = None
     for _ in range(3):
         try:
-            sem = posix_ipc.Semaphore(sem_name)
-            sem.close()
-            sem.unlink()
+            # Unlink by name; a closed semaphore handle is invalid on Linux.
+            posix_ipc.unlink_semaphore(sem_name)
             return
         except (posix_ipc.ExistentialError, FileNotFoundError):
             return

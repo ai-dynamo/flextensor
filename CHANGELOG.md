@@ -37,6 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [strategy replan](docs/api/glossary.md#strategy-replan) is available and
   whether it succeeded, without affecting the run. See
   [torch.compile](docs/how-to/torch-compile.md#preflight-and-verify-the-replan).
+- Add profile-backed POSIX-SHM bootstrap to vLLM worker v2 for single-node
+  local `mp` data parallelism (`DP >= 2`, vLLM 0.17.0 or later). One elected
+  worker invokes checkpoint loading while followers build the model topology
+  on `meta` and attach to the shared host backing. The acceptance test targets
+  DP=2 with `Qwen/Qwen2.5-7B-Instruct` at the minimum version; see the
+  [vLLM example](examples/vllm/README.md#share-weights-across-local-data-parallel-workers).
 - Add `preserve_model=False` to `release()` for disposable models that should
   release loader-backed weights without rebuilding private model storage.
   The default continues to preserve the released model.

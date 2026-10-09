@@ -40,7 +40,7 @@ def test_integration_scripts_preserve_cuda_visible_devices(
         "python": python_stub,
         "python3": python_stub,
         "pip": "#!/bin/sh\nexit 0\n",
-        "timeout": '#!/bin/sh\nshift\nexec "$@"\n',
+        "timeout": '#!/bin/sh\nwhile [ "${1#--}" != "$1" ]; do shift; done\nshift\nexec "$@"\n',
     }.items():
         executable = bin_dir / name
         executable.write_text(content)

@@ -21,7 +21,12 @@ def _worker(worker_module, events: list[str], compilation_mode: object | None = 
             mode=compilation_mode,
             cudagraph_mode=worker_module.CUDAGraphMode.NONE,
         ),
-        model_config=SimpleNamespace(architectures=["Qwen2ForCausalLM"]),
+        model_config=SimpleNamespace(
+            architecture="Qwen2ForCausalLM",
+            architectures=["Qwen2ForCausalLM"],
+            convert_type="none",
+            runner_type="generate",
+        ),
         parallel_config=SimpleNamespace(enable_elastic_ep=False, use_ubatching=False),
     )
     raw_model = nn.Module()
@@ -86,6 +91,11 @@ def _install_bootstrap_fakes(  # noqa: C901
             record("offload-from-state")
             callback = worker_module._test_takeover_callback
             return proxy if callback is None else callback(model, config)
+
+        def bind_shared_runtime(self, actual_proxy):
+            assert actual_proxy is proxy
+            record("bootstrap-post-init")
+            record("bind-shared-runtime")
 
     class DeviceMemoryProfiler:
         consumed_memory = 123
