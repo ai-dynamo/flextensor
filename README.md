@@ -24,6 +24,14 @@ improvements and pull requests all help shape the project.
 [Open an issue](https://github.com/ai-dynamo/flextensor/issues) to share your use case or discuss a proposed
 change and see the [contribution guide](CONTRIBUTING.md) to get started.
 
+## Release Plan
+
+- **16 December 2026**
+- **3 February 2027**
+- **11 March 2027**
+
+These target dates may change; we will update this plan as needed based on feature readiness.
+
 ## Why FlexTensor
 
 - **Use the GPUs you already have.** Run models that would otherwise exceed their available memory,
