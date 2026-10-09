@@ -136,6 +136,8 @@ def test_run_vllm_server_test_uses_case_cli_args_without_injecting_enforce_eager
     assert dict(started_cases[0].extra_env_vars) == {
         "VLLM_LOGGING_LEVEL": "DEBUG",
         "VLLM_NO_USAGE_STATS": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "INIT,NET,GRAPH",
     }
     assert metrics["offload_enabled"] is False
 

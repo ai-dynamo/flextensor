@@ -314,6 +314,8 @@ def run_vllm_server_test(  # noqa: C901 - Keep server and optional sampler lifet
         default_env_vars = (
             ("VLLM_LOGGING_LEVEL", "DEBUG"),
             ("VLLM_NO_USAGE_STATS", "1"),
+            ("NCCL_DEBUG", "INFO"),
+            ("NCCL_DEBUG_SUBSYS", "INIT,NET,GRAPH"),
         )
         offload_output_env_vars = (
             (("FT_INSTRUMENTATION_OUTPUT_DIR", str(instrumentation_dir)),) if offload_enabled else ()
