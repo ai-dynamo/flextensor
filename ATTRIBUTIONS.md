@@ -12736,7 +12736,7 @@ THE SOFTWARE.
 ### Licenses
 License: `MIT`
 
-  - `LICENSE (fetched from github.com/chrisspen/ProxyTypes3)`:
+  - `LICENSE`:
 ```
 MIT License
 
@@ -16566,7 +16566,7 @@ SOFTWARE.
 ### Licenses
 License: `BSD-3-Clause`
 
-  - `LICENSE (fetched from github.com/pytorch/pytorch)`:
+  - `LICENSE`:
 ```
 From PyTorch:
 
@@ -16665,7 +16665,7 @@ POSSIBILITY OF SUCH DAMAGE.
 ### Licenses
 License: `MIT License`
 
-  - `LICENSE (fetched from github.com/triton-lang/triton)`:
+  - `LICENSE`:
 ```
 /*
 * Copyright 2018-2020 Philippe Tillet
