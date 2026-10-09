@@ -13,22 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Add coordinated node-wide shared-memory serving to the LTX 2.3 Outpaint
-  NGINX example. The launcher generates one run-scoped namespace, validates
-  profiles, and performs bounded process-group teardown. Direct serving defaults
-  to private weights and supports SHM via `--shm-namespace`; `single_serve.sh`
-  remains non-SHM.
+- Add shared-memory weight sharing across workers in the LTX 2.3 Outpaint
+  NGINX example, with automatic namespace setup and cleanup. Direct serving
+  supports SHM via `--shm-namespace` and defaults to private weights.
 - Add `SharedOffloadSession` for coordinated loading from profiles. The elected
-  creator loads checkpoint data and publishes live state; followers build model
-  skeletons and attach shared weights. Sessions reserve named managers and retain
-  resources until cleanup succeeds. `cleanup_namespace()` reclaims abandoned
-  generations after workers stop without loading models.
-- Add `TensorManager.export_state()` to publish current tensor IDs, shared block
-  names, and managed-tensor dtypes, shapes, and strides. Existing schema-v3 disk
-  profiles remain loadable by creators, which rebuild this metadata at runtime.
-- Add `flextensor.shm.tensor_store.SharedTensorStore` for publishing resident
-  parameters and registered buffers in shared memory. Followers validate the
-  manifest and copy tensors to their target device while preserving aliases.
+  creator loads checkpoints; followers build model skeletons and attach shared
+  weights. Existing schema-v3 disk profiles remain supported.
+  `cleanup_namespace()` reclaims abandoned shared resources after workers stop.
+- Add `TensorManager.export_state()` to publish live tensor metadata and
+  `SharedTensorStore` to share resident parameters and registered buffers with
+  followers while preserving aliases.
 - Add `OffloadManager.offload_units()` / `resident_units()` (and matching
   package-level helpers) to list outermost offloaded and GPU-resident modules
   as `(name, module)` pairs for external per-unit compile.
@@ -39,9 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [torch.compile](docs/how-to/torch-compile.md#preflight-and-verify-the-replan).
 - Add profile-backed POSIX-SHM bootstrap to vLLM worker v2 for single-node
   local `mp` data parallelism (`DP >= 2`, vLLM 0.17.0 or later). One elected
-  worker invokes checkpoint loading while followers build the model topology
-  on `meta` and attach to the shared host backing. The acceptance test targets
-  DP=2 with `Qwen/Qwen2.5-7B-Instruct` at the minimum version; see the
+  worker loads checkpoints while followers attach to shared host weights; see the
   [vLLM example](examples/vllm/README.md#share-weights-across-local-data-parallel-workers).
 - Add `preserve_model=False` to `release()` for disposable models that should
   release loader-backed weights without rebuilding private model storage.
@@ -52,13 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `OffloadConfig(shm_enabled=True)` requires an explicit, non-empty
   `shm_namespace`. Use `SharedOffloadSession` to manage creator/follower election,
   per-manager namespaces, publication, and cleanup.
-- **Breaking:** Upgrade the SHM protocol from v3 to v4, with unique participant
-  identities and explicit `INITIALIZING`, `READY`, and `FAILED` coordinator
-  states. All participants must use the same version and restart together.
-- Let profiles and tensor blocks share their coordinator's heartbeat and
-  lifetime, keeping names available until the last participant leaves.
-- Register pinned SHM mappings through `torch.cuda.cudart()` with portable host
-  registration; CuPy is no longer required.
+- **Breaking:** Upgrade the SHM protocol from v3 to v4. All participants sharing
+  a namespace must use the same version and restart together.
+- Remove the CuPy requirement for SHM by registering pinned mappings through
+  PyTorch's CUDA runtime.
 
 ### Deprecated
 
@@ -67,21 +56,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Include the exact session namespace and manager name in cleanup instructions
-  for `SharedOffloadSession` admission errors, including in `str(error)`.
 - Preserve hidden model modules during offloading; avoid missing-attribute crashes.
-- Skip the `posix-ipc` dependency and POSIX-only imports on Windows to unblock
-  installation and use without shared memory (SHM). SHM remains unsupported on Windows.
-- Restore SHM profiles with an explicit creator or follower role. Creators discard
-  saved block names and publish fresh allocations; followers validate published
-  metadata before attaching. Failed restoration retains unfinished cleanup and
-  prevents manager reuse until it succeeds.
-- Propagate creator initialization failures and expired heartbeats to waiting
-  followers, with optional bounded waits. Publish readiness in the coordinator
-  header instead of a separate per-block ready notification.
-- Clean up partial SHM setup and retain handles when teardown fails so cleanup
-  can be retried. Propagate lock-release errors and notify every local waiter
-  without losing semaphore ownership.
+- Support installation and use on Windows without SHM by skipping `posix-ipc`
+  and POSIX-only imports.
+- Prevent SHM followers from hanging after creator failures or losing shared
+  blocks while still attached. Support bounded initialization waits and retrying
+  failed cleanup.
 - Allocation-block construction failures now restore released source tensors
   and clean up partially created CPU, GPU, and SHM blocks without masking the
   original error, including failures while constructing the transfer loader.
