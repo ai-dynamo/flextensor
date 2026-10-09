@@ -96,32 +96,39 @@ class KeepAliveDict:
         # SharedMemoryDict handles both creation and connection automatically
         # Note: SharedMemoryDict will add "sm_" prefix internally
         self.dict = SharedMemoryDict(name=name, size=size)
-        # Use _name (with / prefix) to match what resource_tracker registered
-        resource_tracker_unregister(self.dict.shm._name, "shared_memory")  # noqa: SLF001
-
-        # For SharedMemory, respect is_creator but handle already-exists gracefully
-        if is_creator:
-            try:
-                shm = SharedMemory(name=meta_name, create=True, size=size)
-            except FileExistsError:
-                # Creator expected to create, but it already exists - connect to it
-                shm = SharedMemory(name=meta_name, create=False)
-        else:
-            # Not creator - just connect
-            shm = SharedMemory(name=meta_name, create=False)
-        self.shm: SharedMemory | None = shm
-        # Use _name (with / prefix) to match what resource_tracker registered
-        resource_tracker_unregister(shm._name, "shared_memory")  # type: ignore[attr-defined]  # noqa: SLF001
-
-        # macOS may round the POSIX mapping up to a page; expose only the
-        # protocol-requested timestamp slots so capacity is platform-stable.
-        shm_buffer = shm.buf
-        if shm_buffer is None:
-            raise RuntimeError("Shared memory buffer is unavailable")
-        self.shm_view: memoryview | None = shm_buffer.cast("d")[: size // 8]  # type: ignore[assignment]
+        self.shm: SharedMemory | None = None
+        self.shm_view: memoryview | None = None
         self._closed = False
         self._meta_name_unlinked = False
         self._dict_name_unlinked = False
+
+        try:
+            # Use _name (with / prefix) to match what resource_tracker registered
+            resource_tracker_unregister(self.dict.shm._name, "shared_memory")  # noqa: SLF001
+
+            # For SharedMemory, respect is_creator but handle already-exists gracefully
+            if is_creator:
+                try:
+                    shm = SharedMemory(name=meta_name, create=True, size=size)
+                except FileExistsError:
+                    shm = SharedMemory(name=meta_name, create=False)
+            else:
+                shm = SharedMemory(name=meta_name, create=False)
+            self.shm = shm
+            resource_tracker_unregister(shm._name, "shared_memory")  # type: ignore[attr-defined]  # noqa: SLF001
+
+            # macOS may round the POSIX mapping up to a page; expose only the
+            # protocol-requested timestamp slots so capacity is platform-stable.
+            shm_buffer = shm.buf
+            if shm_buffer is None:
+                raise RuntimeError("Shared memory buffer is unavailable")
+            self.shm_view = shm_buffer.cast("d")[: size // 8]  # type: ignore[assignment]
+        except BaseException:
+            # Construction has not returned an object for KeepAlive to clean up.
+            # Close local handles; shared names may belong to another participant.
+            with contextlib.suppress(Exception):
+                self.close()
+            raise
 
     def _view(self) -> Any:
         if self.shm_view is None:
@@ -294,9 +301,8 @@ class KeepAlive:
         self.keep_alive_seconds = keep_alive_seconds
         self._registration_key = (dict_name, self.participant_id)
         self._registered: bool = False
-        self.keep_alive_dict: KeepAliveDict | None = KeepAliveDict(
-            name=dict_name, size=keep_alive_dict_size, is_creator=is_creator, meta_name=dict_meta_name
-        )
+        self.keep_alive_dict: KeepAliveDict | None = None
+        self.lock: BaseLock | None = None
         self.create_lock = is_creator
         self._lock_name_unlinked = False
         self.stop_event = threading.Event()  # Event to signal thread to stop
@@ -304,18 +310,23 @@ class KeepAlive:
         self.keep_alive_thread: threading.Thread | None = None
 
         try:
-            # Create or connect to lock, then acquire it for initialization
-            self.lock: BaseLock | None = self.lock_class(lock_name, locked=False)
+            # Serialize SHM creation and sizing before another participant can map it.
+            self.lock = self.lock_class(lock_name, locked=False)
             self.lock.acquire(non_blocking=False, timeout=LOCK_ACQUIRE_TIMEOUT)
         except BaseException as e:
-            self._cleanup_init_failure(unlink=unlink_on_init_failure)
+            # No SHM was opened, and a lock we failed to acquire may be in use.
+            self._cleanup_init_failure(unlink=False)
             if isinstance(e, (posix_ipc.BusyError, RuntimeError, BlockingIOError)):
                 msg = f"KeepAlive lock '{lock_name}' initialization failed (is_creator={is_creator})"
                 raise RuntimeError(msg) from e
             raise
 
-        registration_created = self.participant_id not in self.keep_alive_dict
+        registration_created = False
         try:
+            self.keep_alive_dict = KeepAliveDict(
+                name=dict_name, size=keep_alive_dict_size, is_creator=is_creator, meta_name=dict_meta_name
+            )
+            registration_created = self.participant_id not in self.keep_alive_dict
             self.slot = self.keep_alive_dict.prepare_slot(self.participant_id)
             self._retain_registration()
             self._start_keep_alive_thread()
@@ -329,7 +340,12 @@ class KeepAlive:
             self.keep_alive_thread = None
             last_registration = self._release_registration()
             with contextlib.suppress(Exception):
-                if registration_created and last_registration and self.participant_id in self.keep_alive_dict:
+                if (
+                    self.keep_alive_dict is not None
+                    and registration_created
+                    and last_registration
+                    and self.participant_id in self.keep_alive_dict
+                ):
                     self.keep_alive_dict.pop(self.participant_id)
             self._cleanup_init_failure(unlink=unlink_on_init_failure)
             raise

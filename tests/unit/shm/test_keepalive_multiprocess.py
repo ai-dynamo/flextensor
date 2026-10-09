@@ -4,10 +4,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import multiprocessing
 import os
+import subprocess  # noqa: S404 - isolate the resource tracker and capture its stderr
+import sys
 import time
+import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import posix_ipc
 import pytest
@@ -204,6 +210,91 @@ def long_holding_process(
         result_queue.put({"success": False, "error": f"{type(e).__name__}: {e}", "process_id": label})
 
 
+def _initialization_race_process(name, lock_class, is_creator, initializing, resume, finish, result_queue):
+    """Pause SHM sizing in the creator and report lock contention in the follower."""
+    real_ftruncate = os.ftruncate
+
+    def pause_before_sizing(fd, size):
+        if is_creator:
+            initializing.set()
+            wait_for_event(resume, "creator initialization release", timeout=3 * EVENT_TIMEOUT)
+        real_ftruncate(fd, size)
+
+    class ObservedLock(lock_class):
+        def acquire(self, non_blocking=False, timeout=None):
+            if not is_creator and not getattr(self, "reported", False):
+                self.reported = True
+                try:
+                    super().acquire(non_blocking=True)
+                except (posix_ipc.BusyError, BlockingIOError):
+                    result_queue.put(("blocked", os.getpid()))
+                else:
+                    raise AssertionError("follower acquired lock while creator was initializing")
+            super().acquire(non_blocking=non_blocking, timeout=timeout)
+
+    keep_alive = None
+    try:
+        with patch("multiprocessing.shared_memory.os.ftruncate", side_effect=pause_before_sizing):
+            keep_alive = KeepAlive(
+                name=name,
+                process_id=os.getpid(),
+                is_creator=is_creator,
+                lock_class=ObservedLock,
+            )
+        result_queue.put(("ready", os.getpid()))
+        wait_for_event(finish, "participant shutdown")
+    except BaseException as error:
+        result_queue.put(("error", f"{type(error).__name__}: {error}"))
+        raise
+    finally:
+        if keep_alive is not None:
+            keep_alive.close(any_process_alive=True)
+
+
+def _check_initialization_race(lock_class):
+    """A follower waits while the creator's SHM object exists with size zero."""
+    context = multiprocessing.get_context("spawn")
+    name = f"ka_init_{uuid.uuid4().hex[:8]}"
+    initializing, resume, finish = (context.Event() for _ in range(3))
+    result_queue = context.Queue()
+    processes = [
+        context.Process(
+            target=_initialization_race_process,
+            args=(name, lock_class, is_creator, initializing, resume, finish, result_queue),
+        )
+        for is_creator in (True, False)
+    ]
+    creator, follower = processes
+
+    try:
+        creator.start()
+        wait_for_event(initializing, "creator paused before SHM sizing", proc=creator)
+        follower.start()
+        assert drain_results(result_queue, expected_count=1) == [("blocked", follower.pid)]
+
+        resume.set()
+        results = drain_results(result_queue, expected_count=2)
+        assert set(results) == {("ready", creator.pid), ("ready", follower.pid)}
+        finish.set()
+        for proc in processes:
+            proc.join(timeout=EVENT_TIMEOUT)
+            assert_clean_exit(proc, "KeepAlive initialization participant")
+    finally:
+        resume.set()
+        finish.set()
+        for proc in processes:
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=EVENT_TIMEOUT)
+        for shm_name in (f"sm_{name}_d", f"{name}_m"):
+            unlink_shared_memory_if_present(shm_name)
+        with contextlib.suppress(posix_ipc.ExistentialError):
+            posix_ipc.unlink_semaphore(f"/{name}_s")
+        Path(ProcessFileLock.resolve_path(f"{name}_s")).unlink(missing_ok=True)
+        result_queue.close()
+        result_queue.join_thread()
+
+
 class TestKeepAliveMultiprocess:
     """Multiprocess tests for KeepAlive class."""
 
@@ -305,72 +396,24 @@ class TestKeepAliveMultiprocess:
 
     @pytest.mark.parametrize("lock_class", [SemaphoreLock, ProcessFileLock])
     def test_race_condition_protection(self, lock_class):
-        """Test that semaphores protect against race conditions when many processes
-        race to create/connect to KeepAlive concurrently."""
-        result_queue = multiprocessing.Queue()
-        num_processes = 4
-        start_barrier = multiprocessing.Barrier(num_processes + 1, timeout=EVENT_TIMEOUT)
-        # Workers must outlive the staleness threshold so a slow-to-register peer
-        # isn't seen as stale by the others — derive from keep_alive_seconds so
-        # raising the staleness floor in setup_method keeps this test meaningful.
-        worker_duration = self.keep_alive_seconds
-        processes = []
-
-        for i in range(num_processes):
-            create_semaphore = i == 0
-            proc = multiprocessing.Process(
-                target=create_keepalive_process,
-                args=(
-                    self.test_name,
-                    f"proc_{i}",
-                    self.keep_alive_seconds,
-                    create_semaphore,
-                    result_queue,
-                    worker_duration,
-                    lock_class,
-                ),
-                kwargs={"start_barrier": start_barrier},
-            )
-            processes.append(proc)
-
-        try:
-            for proc in processes:
-                proc.start()
-
-            # Let spawn/forkserver imports finish before racing initialization
-            # and starting the bounded worker-exit wait.
-            start_barrier.wait()
-
-            for i, proc in enumerate(processes):
-                proc.join(timeout=EVENT_TIMEOUT)
-                assert_clean_exit(proc, f"proc_{i}")
-
-            results = drain_results(result_queue, expected_count=num_processes)
-
-            # Acceptable failure modes are race-induced IPC errors. Match by
-            # exception type name (workers format errors as ``f"{type(e).__name__}: {e}"``)
-            # rather than free-form message text, which can change with locale or
-            # embedded paths and silently let unrelated failures slip through.
-            allowed_error_prefixes = (
-                "ExistentialError:",
-                "FileNotFoundError:",
-                "FileExistsError:",
-            )
-            for result in results:
-                if not result["success"]:
-                    error = result.get("error", "")
-                    assert error.startswith(allowed_error_prefixes), f"Unexpected (non-race) error: {error}"
-
-            # At minimum the creator must have succeeded; surface any unexpected
-            # failure list with full detail.
-            success_count = sum(1 for r in results if r["success"])
-            assert success_count >= 1, f"No worker succeeded; failures: {format_failed_results(results)}"
-
-        finally:
-            for proc in processes:
-                if proc.is_alive():
-                    proc.terminate()
-                    proc.join(timeout=EVENT_TIMEOUT)
+        """Initialization blocks followers and leaves the resource tracker clean."""
+        # A fresh interpreter owns its tracker, so capture includes tracker errors
+        # through shutdown even when all worker exit codes are zero.
+        script = (
+            "from shm.test_keepalive_multiprocess import _check_initialization_race\n"
+            f"from flextensor.shm import {lock_class.__name__}\n"
+            f"_check_initialization_race({lock_class.__name__})\n"
+        )
+        result = subprocess.run(  # noqa: S603 - fixed test helper and parametrized lock classes
+            [sys.executable, "-c", script],
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            timeout=12 * EVENT_TIMEOUT,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "resource_tracker" not in result.stderr, result.stderr
 
     @pytest.mark.parametrize("lock_class", [SemaphoreLock, ProcessFileLock])
     def test_no_deadlock_on_cleanup(self, lock_class):
