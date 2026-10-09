@@ -2,9 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests for ShmCoordinator — creator/follower orchestration."""
 
+import multiprocessing
+import os
+import signal
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
-from unittest.mock import MagicMock
 
 import posix_ipc
 import pytest
@@ -13,7 +16,7 @@ import torch
 from flextensor.allocation_block import AllocationManager
 from flextensor.host_pinning import HostPinner
 from flextensor.shm.coord_block import CoordinatorState
-from flextensor.shm.coordinator import ShmCoordinator, ShmCreatorDiedError, ShmCreatorFailedError
+from flextensor.shm.coordinator import ShmCoordinator, ShmCoordinatorError, ShmCreatorDiedError, ShmCreatorFailedError
 from flextensor.shm.flexible_shm import FlexibleSharedMemory
 from flextensor.shm.namespace import SHM_PROTOCOL_VERSION
 from flextensor.state_handler import TensorManagerState
@@ -173,6 +176,72 @@ def test_follower_cannot_create_missing_owned_blocks(namespace):
             FlexibleSharedMemory(name=child.name, shm_size=8, _owner=follower.memory_owner)
 
 
+def test_concurrent_joiners_cannot_revive_a_dead_ready_generation(namespace):
+    creator = ShmCoordinator(namespace)
+    creator.notify_ready()
+    creator.memory_owner.keep_alive.stop()
+
+    def join():
+        with pytest.raises(ShmCoordinatorError, match="no live participants"):
+            ShmCoordinator(namespace)
+
+    try:
+        with ThreadPoolExecutor(max_workers=4) as workers:
+            list(workers.map(lambda _: join(), range(8)))
+        assert not creator.memory_owner.keep_alive.any_process_alive()
+    finally:
+        creator.close()
+
+
+def _kill_joiner_during_validation(namespace):
+    def die_before_validation(*args):
+        os.kill(os.getpid(), signal.SIGKILL)
+
+    ShmCoordinator._validate_follower = die_before_validation
+    ShmCoordinator(namespace)
+
+
+def test_killed_joiner_cannot_revive_a_dead_ready_generation(namespace):
+    creator = ShmCoordinator(namespace)
+    creator.notify_ready()
+    keep_alive = creator.memory_owner.keep_alive
+    keep_alive.stop()
+    worker = multiprocessing.get_context("spawn").Process(target=_kill_joiner_during_validation, args=(namespace,))
+    try:
+        worker.start()
+        worker.join(timeout=30)
+        assert worker.exitcode == -signal.SIGKILL
+        # SIGKILL bypasses constructor rollback: admission must publish nothing.
+        assert not keep_alive.any_process_alive()
+        for _ in range(2):
+            with pytest.raises(ShmCoordinatorError, match="no live participants"):
+                unexpected = ShmCoordinator(namespace)
+                unexpected.close()
+    finally:
+        if worker.is_alive():
+            worker.kill()
+            worker.join(timeout=10)
+        # Also clean up if a regression leaked a heartbeat from the dead child.
+        with keep_alive.lock:
+            for participant_id, _ in list(keep_alive.keep_alive_dict.items()):
+                keep_alive.keep_alive_dict.pop(participant_id)
+        creator.close()
+
+
+def test_late_joiner_accepts_live_follower_after_creator_exits(namespace):
+    with ExitStack() as cleanup:
+        creator = ShmCoordinator(namespace)
+        cleanup.callback(creator.close)
+        survivor = ShmCoordinator(namespace)
+        cleanup.callback(survivor.close)
+        creator.notify_ready()
+        creator.close()
+        late = ShmCoordinator(namespace)
+        cleanup.callback(late.close)
+        late.wait_for_ready(timeout=1.0)
+        assert not late.is_creator_alive()
+
+
 class TestShmCoordinatorCreator:
     """Tests for ShmCoordinator in creator role."""
 
@@ -329,30 +398,36 @@ class TestShmCoordinatorVersionGate:
     """Tests for version gate enforcement."""
 
     @pytest.mark.parametrize("cleanup_error_type", [OSError, KeyboardInterrupt])
-    def test_validation_error_survives_cleanup_failure(self, monkeypatch, caplog, cleanup_error_type):
+    def test_validation_error_survives_cleanup_failure(self, namespace, monkeypatch, caplog, cleanup_error_type):
         validation_error = RuntimeError("protocol version mismatch")
-        cleanup_error = cleanup_error_type("close failed")
-        close = MagicMock(side_effect=cleanup_error)
+        creator = ShmCoordinator(namespace)
 
-        class _FollowerShm(FlexibleSharedMemory):
-            def __init__(self, *args, **kwargs):
-                self.shm_creator = False
-                self.close = close
+        def fail_validation(self, shm, has_live_peer):
+            raise validation_error
 
-        monkeypatch.setattr("flextensor.shm.coordinator.FlexibleSharedMemory", _FollowerShm)
-        monkeypatch.setattr(ShmCoordinator, "_validate_version", MagicMock(side_effect=validation_error))
+        cleanup_on_init_failure = FlexibleSharedMemory._cleanup_on_init_failure
 
-        with pytest.raises(RuntimeError, match="protocol version mismatch") as exc_info:
-            ShmCoordinator("validation_cleanup_failure")
+        def cleanup_then_fail(shm):
+            cleanup_on_init_failure(shm)
+            raise cleanup_error_type("close failed")
 
-        assert exc_info.value is validation_error
-        close.assert_called_once_with()
-        assert any(
-            record.getMessage() == "Failed to close SHM after follower validation failed"
-            and record.exc_info is not None
-            and record.exc_info[1] is cleanup_error
-            for record in caplog.records
-        )
+        try:
+            with monkeypatch.context() as scoped:
+                scoped.setattr(ShmCoordinator, "_validate_follower", fail_validation)
+                scoped.setattr(FlexibleSharedMemory, "_cleanup_on_init_failure", cleanup_then_fail)
+                with pytest.raises(RuntimeError, match="protocol version mismatch") as exc_info:
+                    ShmCoordinator(namespace)
+                assert exc_info.value is validation_error
+                record = next(
+                    record for record in caplog.records if "Failed during SHM initialization rollback" in record.message
+                )
+                assert record.exc_info[0] is cleanup_error_type
+                assert str(record.exc_info[1]) == "close failed"
+            # Rollback still releases the setup lock when cleanup reports an error.
+            follower = ShmCoordinator(namespace)
+            follower.close()
+        finally:
+            creator.close()
 
     def test_v3_rejected_before_attaching_the_new_name_registry(self, namespace):
         from flextensor._version import __version__

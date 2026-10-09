@@ -8,6 +8,7 @@ processes with automatic liveness tracking and coordinated cleanup.
 
 import contextlib
 import json
+import logging
 import math
 import os
 import secrets
@@ -15,6 +16,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
+from functools import partial
 from multiprocessing.resource_tracker import register as resource_tracker_register
 from multiprocessing.resource_tracker import unregister as resource_tracker_unregister
 from multiprocessing.shared_memory import SharedMemory
@@ -30,6 +32,8 @@ from flextensor.shm.sync_primitives import BaseLock, ProcessFileLock, SemaphoreL
 
 if sys.platform != "win32":
     import posix_ipc
+
+logger = logging.getLogger(__name__)
 
 LOCK_ACQUIRE_TIMEOUT = 5.0  # Must be float for beartype type checking
 _PARTICIPANT_COUNTER_BITS = 32
@@ -269,6 +273,7 @@ class KeepAlive:
         lock_name: str | None = None,
         unlink_on_init_failure: bool = False,
         participant_id: int | None = None,
+        _before_register: Callable[[bool], None] | None = None,
     ) -> None:
         """Initialize keep-alive tracking for a participant in the current process.
 
@@ -285,6 +290,8 @@ class KeepAlive:
             unlink_on_init_failure: Remove auxiliary resources if initialization fails.
             participant_id: Optional unique identity for this liveness participant.
                 Defaults to process_id for direct-caller compatibility.
+            _before_register: Internal admission check, called under the heartbeat
+                lock with existing-peer liveness before publishing this heartbeat.
         """
         if keep_alive_seconds <= 0 or not math.isfinite(keep_alive_seconds):
             raise ValueError("keep_alive_seconds must be finite and positive")
@@ -327,6 +334,9 @@ class KeepAlive:
                 name=dict_name, size=keep_alive_dict_size, is_creator=is_creator, meta_name=dict_meta_name
             )
             registration_created = self.participant_id not in self.keep_alive_dict
+            if _before_register is not None:
+                cutoff = time.time() - self.keep_alive_seconds
+                _before_register(any(timestamp >= cutoff for _, timestamp in self.keep_alive_dict.items()))
             self.slot = self.keep_alive_dict.prepare_slot(self.participant_id)
             self._retain_registration()
             self._start_keep_alive_thread()
@@ -510,6 +520,7 @@ class FlexibleSharedMemory:
         lock_acquire_timeout: float | None = LOCK_ACQUIRE_TIMEOUT,
         _creator_initializer: Callable[["FlexibleSharedMemory"], None] | None = None,
         _owner: "FlexibleSharedMemory | None" = None,
+        _follower_initializer: Callable[["FlexibleSharedMemory", bool], None] | None = None,
     ) -> None:
         """Initialize flexible shared memory.
 
@@ -525,6 +536,9 @@ class FlexibleSharedMemory:
                 that creates the main SHM block, while the setup lock is held.
             _owner: Internal coordination handle that owns this block's lifetime.
                 Owned blocks close locally; the last coordinator unlinks their names.
+            _follower_initializer: Internal validation callback for existing blocks,
+                receiving existing-peer liveness before registering a heartbeat,
+                while the setup lock still excludes other joins and teardown.
 
         """
         if sys.platform == "win32":
@@ -559,10 +573,22 @@ class FlexibleSharedMemory:
             raise ValueError(msg)
 
         if _owner is None:
-            self._initialize(keep_alive_dict_size, keep_alive_seconds, lock_acquire_timeout, _creator_initializer)
+            self._initialize(
+                keep_alive_dict_size,
+                keep_alive_seconds,
+                lock_acquire_timeout,
+                _creator_initializer,
+                _follower_initializer,
+            )
         else:
             with _owner._child_setup(self):  # noqa: SLF001
-                self._initialize(keep_alive_dict_size, keep_alive_seconds, lock_acquire_timeout, _creator_initializer)
+                self._initialize(
+                    keep_alive_dict_size,
+                    keep_alive_seconds,
+                    lock_acquire_timeout,
+                    _creator_initializer,
+                    _follower_initializer,
+                )
 
     def _initialize(
         self,
@@ -570,6 +596,7 @@ class FlexibleSharedMemory:
         keep_alive_seconds: int | float,
         lock_acquire_timeout: float | None,
         creator_initializer: Callable[["FlexibleSharedMemory"], None] | None,
+        follower_initializer: Callable[["FlexibleSharedMemory", bool], None] | None,
     ) -> None:
         """Open resources briefly under the owner lock; publish under the child lock."""
         create_auxiliary_resources = self.shm_size > 0
@@ -582,9 +609,7 @@ class FlexibleSharedMemory:
                 raise RuntimeError(f"Shared-memory block '{self.name}' has no setup lock")
             self.main_lock.acquire(non_blocking=False, timeout=lock_acquire_timeout)
         except BaseException as e:
-            self._cleanup_on_init_failure()
-            with contextlib.suppress(Exception):
-                self._release_and_close_main_lock_after_init_failure()
+            self._rollback_initialization()
             if isinstance(e, (posix_ipc.BusyError, BlockingIOError)):
                 msg = (
                     f"Failed to acquire main lock for shared memory '{self.name}' within {lock_acquire_timeout} seconds"
@@ -613,6 +638,11 @@ class FlexibleSharedMemory:
                     dict_meta_name=self.name + "_km",
                     lock_name=self.name + "_ks",
                     unlink_on_init_failure=self.shm_creator,
+                    _before_register=(
+                        partial(follower_initializer, self)
+                        if not self.shm_creator and follower_initializer is not None
+                        else None
+                    ),
                 )
 
             if self.shm_creator and creator_initializer is not None:
@@ -623,9 +653,8 @@ class FlexibleSharedMemory:
             self._register_pinned_memory()
         except BaseException:
             # Setup failed while the main lock is still held. Roll back shared
-            # resources, then release and close the constructor-only lock handle.
-            self._cleanup_on_init_failure()
-            self._release_and_close_main_lock_after_init_failure()
+            # resources, preserving validation errors even if cleanup is interrupted.
+            self._rollback_initialization()
             raise
 
         try:
@@ -633,9 +662,16 @@ class FlexibleSharedMemory:
         except BaseException:
             with contextlib.suppress(Exception):
                 self._unregister_pinned_memory()
-            self._cleanup_on_init_failure()
-            self._release_and_close_main_lock_after_init_failure()
+            self._rollback_initialization()
             raise
+
+    def _rollback_initialization(self) -> None:
+        """Preserve the setup error and try both cleanup steps, logging failures."""
+        for cleanup in (self._cleanup_on_init_failure, self._release_and_close_main_lock_after_init_failure):
+            try:
+                cleanup()
+            except BaseException:
+                logger.exception("Failed during SHM initialization rollback: %s", cleanup.__name__)
 
     def _release_and_close_main_lock_after_init_failure(self) -> None:
         """Best-effort release and close when setup fails with the lock held."""
@@ -654,7 +690,7 @@ class FlexibleSharedMemory:
         """Open the coordinator's name registry after its protocol version is validated.
 
         Creation runs inside the coordinator initializer, under its setup lock.
-        Followers already hold a heartbeat registration when they attach.
+        Followers attach under the same setup lock, before registering a heartbeat.
         """
         names = SharedMultiString(name=self.name + "_b", create=create)
         if create and not names._created:  # noqa: SLF001

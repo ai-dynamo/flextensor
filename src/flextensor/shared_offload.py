@@ -31,7 +31,7 @@ from torch import nn
 
 from flextensor.config import OffloadConfig  # noqa: TC001 - beartype resolves public annotations at runtime.
 from flextensor.offload_manager import DEFAULT_MANAGER_NAME, OffloadManager, get_offload_manager
-from flextensor.shm.coordinator import ShmCoordinator
+from flextensor.shm.coordinator import ShmCoordinator, ShmCoordinatorError
 from flextensor.shm.namespace import SHM_PROTOCOL_VERSION
 from flextensor.shm.tensor_store import SharedTensorStore
 from flextensor.state_handler import TensorManagerStateHandler
@@ -254,6 +254,9 @@ class SharedOffloadSession:
                 failure.
             ShmCreatorDiedError: If the creator heartbeat expires while it is
                 still initializing.
+            ShmCoordinatorError: If the existing generation has no live heartbeat
+                lease. Stop workers and use :meth:`cleanup_namespace` before
+                reusing a dead namespace.
 
         Note:
             Exceptions raised by either model factory or by *compile_fn*
@@ -293,7 +296,16 @@ class SharedOffloadSession:
             resources.manager = manager
 
             # Election happens here, before either application factory runs.
-            coordinator = ShmCoordinator(manager_namespace)
+            try:
+                coordinator = ShmCoordinator(manager_namespace)
+            except ShmCoordinatorError as error:
+                # Keep recovery visible in str(error) without replacing the exception.
+                error.args = (
+                    f"{error}. Stop workers and prevent new joins, then run "
+                    f"SharedOffloadSession.cleanup_namespace({self.namespace!r}, manager_names=[{name!r}]) "
+                    "before retrying.",
+                )
+                raise
             resources.coordinator = coordinator
             role = "creator" if coordinator.is_creator else "follower"
             LOGGER.info(

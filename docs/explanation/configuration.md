@@ -377,6 +377,15 @@ may already be removed if a later one fails; retrying is safe. Stable setup-lock
 files remain to preserve synchronization. A supervisor or operator must run
 cleanup if the entire serving launcher is killed.
 
+Joining requires an existing, unexpired participant lease. When none remains,
+admission fails before the new worker registers its heartbeat. After workers
+are killed, their leases may remain valid for up to 30 seconds from their last
+heartbeat. During that interval, a new worker can attach to a previously ready
+generation, reuse its weights, and keep it alive beyond the original leases'
+expiry. Stop workers, prevent new joins, and complete cleanup before reusing
+the namespace for a fresh run. A surviving follower can retain a generation
+after its creator exits.
+
 The lower-level `OffloadManager` path requires both `shm_enabled=True` and an
 explicit non-empty `shm_namespace`; its caller owns coordination and lifecycle.
 A stable model identity can first be converted with

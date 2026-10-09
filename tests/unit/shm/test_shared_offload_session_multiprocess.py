@@ -30,6 +30,7 @@ import flextensor.shared_offload as shared_offload_module
 from flextensor.config import OffloadConfig
 from flextensor.offload_manager import OffloadManager, OffloadModelProxy, OffloadPhase
 from flextensor.shared_offload import SharedOffloadSession
+from flextensor.shm.coordinator import ShmCoordinatorError
 from flextensor.shm.namespace import coord_block_name, profile_block_name
 from flextensor.state_handler import TensorManagerState, TensorManagerStateHandler
 
@@ -411,3 +412,38 @@ def test_creator_publishes_and_spawned_follower_materializes_real_shared_state(
                 process.join(timeout=_PROCESS_TIMEOUT)
         for name in _fsm_names(manager_namespace):
             _cleanup_fsm_namespace(name)
+
+
+def test_session_rejects_dead_generation_before_profile_read_or_factories(tmp_path, monkeypatch):
+    namespace = f"ft_{uuid.uuid4().hex[:8]}"
+    monkeypatch.setattr(shared_offload_module, "get_offload_manager", _CpuSharedOffloadManager)
+    profile = tmp_path / "profile.json"
+    TensorManagerStateHandler.save_to_file(profile, _resident_only_state())
+
+    with SharedOffloadSession(namespace) as creator, SharedOffloadSession(namespace) as follower:
+        original = creator.offload_from_profile(
+            tmp_path,
+            config=_config(),
+            name=_MANAGER_NAME,
+            creator_model_factory=lambda: _TinyCpuModel(device="cpu"),
+            follower_model_factory=lambda: pytest.fail("expected creator"),
+            materialize_device="cpu",
+        )
+        creator._resources_by_manager_name[_MANAGER_NAME].coordinator.memory_owner.keep_alive.stop()
+        with pytest.raises(ShmCoordinatorError, match="no live participants") as exc_info:
+            follower.offload_from_profile(
+                tmp_path / "missing_profile",
+                config=_config(),
+                name=_MANAGER_NAME,
+                creator_model_factory=lambda: pytest.fail("dead generation invoked creator factory"),
+                follower_model_factory=lambda: pytest.fail("dead generation invoked follower factory"),
+                materialize_device="cpu",
+            )
+        assert (
+            "Stop workers and prevent new joins, then run "
+            f"SharedOffloadSession.cleanup_namespace({namespace!r}, manager_names=[{_MANAGER_NAME!r}]) "
+            "before retrying."
+        ) in str(exc_info.value)
+        assert str(exc_info.value).count("SharedOffloadSession.cleanup_namespace") == 1
+        assert original(torch.tensor([[3.0, -1.0]])).detach().tolist() == _EXPECTED_OUTPUT
+    _assert_segments_removed(creator.namespace_for(_MANAGER_NAME))

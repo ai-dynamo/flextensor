@@ -67,6 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Include the exact session namespace and manager name in cleanup instructions
+  for `SharedOffloadSession` admission errors, including in `str(error)`.
 - Preserve hidden model modules during offloading; avoid missing-attribute crashes.
 - Skip the `posix-ipc` dependency and POSIX-only imports on Windows to unblock
   installation and use without shared memory (SHM). SHM remains unsupported on Windows.

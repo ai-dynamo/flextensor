@@ -76,7 +76,8 @@ class ShmCoordinator:
     """Orchestrates creator/follower SHM sharing.
 
     On init, tries to connect to an existing coordination block:
-    - If it exists: becomes follower, validates version gate.
+    - If it exists: validates version and an existing live participant
+      under the setup lock before becoming a follower.
     - If it doesn't exist: becomes creator, writes version header.
 
     Args:
@@ -98,6 +99,7 @@ class ShmCoordinator:
                 name=crd_name,
                 shm_size=0,
                 keep_alive_seconds=keep_alive_seconds,
+                _follower_initializer=self._validate_follower,
             )
         except FileNotFoundError:
             # The initializer executes only for the actual creator and while
@@ -108,21 +110,11 @@ class ShmCoordinator:
                 shm_size=_COORD_BLOCK_SIZE,
                 keep_alive_seconds=keep_alive_seconds,
                 _creator_initializer=self._write_version_header,
+                _follower_initializer=self._validate_follower,
             )
 
         self._coord_shm = coord_shm
         self.is_creator = coord_shm.shm_creator
-        if not self.is_creator:
-            try:
-                self._validate_version()
-                coord_shm._enable_child_ownership(create=False)  # noqa: SLF001
-            except BaseException:
-                self._coord_shm = None
-                try:
-                    coord_shm.close()
-                except BaseException:
-                    logger.exception("Failed to close SHM after follower validation failed")
-                raise
         logger.info("ShmCoordinator: %s initialized %s", "creator" if self.is_creator else "follower", namespace)
 
     def _write_version_header(self, shm: FlexibleSharedMemory) -> None:
@@ -146,9 +138,15 @@ class ShmCoordinator:
         """The shared lifetime for this manager's profile and tensor blocks."""
         return _require_block(self._coord_shm, "coord")
 
-    def _validate_version(self) -> None:
-        """Read and validate version header (follower only)."""
-        header = self._read_header()
+    def _validate_follower(self, shm: FlexibleSharedMemory, has_live_peer: bool) -> None:
+        """Validate under the setup and heartbeat locks, before registering this joiner."""
+        header = CoordBlockHeader.read_from(_require_buffer(shm, "coord"))
+        header.validate(expected_version=__version__, expected_protocol=SHM_PROTOCOL_VERSION)
+        if not has_live_peer:
+            raise ShmCoordinatorError(f"Shared namespace '{self.namespace}' has no live participants")
+        shm._enable_child_ownership(create=False)  # noqa: SLF001
+        if shm._owned_names is not None and shm._owned_names.is_ready():  # noqa: SLF001
+            raise ShmCoordinatorError(f"Shared namespace '{self.namespace}' is retired; cleanup is required")
         self._creator_participant_id = header.creator_pid
 
     def _read_header(self, lock_timeout: float | None = None) -> CoordBlockHeader:

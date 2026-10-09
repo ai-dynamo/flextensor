@@ -18,7 +18,7 @@ import pytest
 
 from flextensor.shared_offload import SharedOffloadSession
 from flextensor.shm.coord_block import CoordBlockHeader
-from flextensor.shm.coordinator import ShmCoordinator
+from flextensor.shm.coordinator import DEFAULT_KEEP_ALIVE_SECONDS, ShmCoordinator, ShmCoordinatorError
 from flextensor.shm.flexible_shm import FlexibleSharedMemory
 from flextensor.shm.sync_primitives import ProcessFileLock
 
@@ -235,9 +235,21 @@ def test_cleanup_after_sigkill_of_creator_and_follower_waits_for_leases(namespac
         # their real heartbeat leases, not decide they are dead via kill(pid, 0).
         with pytest.raises(TimeoutError):
             _cleanup(namespace)
-        _cleanup(namespace, timeout=40)
+        time.sleep(DEFAULT_KEEP_ALIVE_SECONDS + 0.1)
+        # Reuse must fail without registering a survivor that prolongs the old
+        # generation. Repeated launches must leave it immediately reclaimable.
+        for _ in range(2):
+            with pytest.raises(ShmCoordinatorError, match="no live participants"):
+                ShmCoordinator(_manager_namespace(namespace))
+        _cleanup(namespace)
         _assert_absent(namespace)
         _cleanup(namespace)
+        fresh = ShmCoordinator(_manager_namespace(namespace))
+        try:
+            assert fresh.is_creator
+        finally:
+            fresh.close()
+        _assert_absent(namespace)
     finally:
         for worker in workers:
             if worker.is_alive():
