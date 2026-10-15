@@ -6,6 +6,7 @@
 import ast
 import re
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,10 @@ QWEN_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 QWEN_CORRECTNESS = VllmCorrectnessCheck(expected_substrings=("Paris",))
 QWEN_EAGER_ARGS = ("--enforce-eager", "--max-model-len", "256", "--max-num-seqs", "1")
 
+_BASELINE_REQUEST_TIMEOUT_SECONDS = 120
+_SERVER_READY_TIMEOUT_SECONDS = 600
+_OFFLOAD_SERVER_READY_TIMEOUT_SECONDS = 1800
+
 
 @pytest.fixture(scope="module")
 def baseline_result(tmp_path_factory):
@@ -36,7 +41,11 @@ def baseline_result(tmp_path_factory):
         output_dir_name="qwen2_5_7b_baseline",
         cli_args=QWEN_EAGER_ARGS,
     )
-    return run_vllm_server_test(case, output_dir=output_dir, correctness_check=QWEN_CORRECTNESS)
+    return run_vllm_server_test(
+        case,
+        output_dir=output_dir,
+        correctness_check=replace(QWEN_CORRECTNESS, timeout=_BASELINE_REQUEST_TIMEOUT_SECONDS),
+    )
 
 
 @pytest.fixture
@@ -73,7 +82,12 @@ def device_gpu() -> torch.device:
 
 
 class TestContribVLLM:
-    """One-GPU vLLM runtime scenarios plus the existing TP2 acceptance test."""
+    """One-GPU vLLM runtime scenarios plus vanilla and offloaded TP2 acceptance tests."""
+
+    @pytest.mark.gpu_vram_min_96g
+    def test_vanilla_cold_start_serves(self, baseline_result) -> None:
+        _, metrics, _ = baseline_result
+        assert metrics["usage"].get("completion_tokens", 0) > 0
 
     @pytest.mark.gpu_vram_40g
     @pytest.mark.usefixtures("device_gpu")
@@ -138,7 +152,7 @@ class TestContribVLLM:
             case,
             output_dir=test_output_dir / "legacy_compiled",
             correctness_check=QWEN_CORRECTNESS,
-            server_ready_timeout=1800,
+            server_ready_timeout=_OFFLOAD_SERVER_READY_TIMEOUT_SECONDS,
         )
         log_text = "\n".join(log_lines)
 
@@ -153,6 +167,11 @@ class TestContribVLLM:
     @pytest.mark.usefixtures("device_gpu")
     def test_v2_allocation_eager_serves_and_reduces_memory(self, baseline_result, test_output_dir: Path) -> None:
         baseline_memory, _, _ = baseline_result
+        assert baseline_memory.weights_memory_gib is not None
+        # Force weight offloading even when the runner has enough VRAM for the entire model.
+        gpu_memory_fraction = (
+            0.5 * baseline_memory.weights_memory_gib * 1024**3 / torch.cuda.get_device_properties(0).total_memory
+        )
         case = (
             VllmOffloadSmokeCase(
                 model_name=QWEN_MODEL,
@@ -162,7 +181,7 @@ class TestContribVLLM:
             .with_flextensor_offload()
             .with_env_vars(
                 ("FT_TRANSFER_MODE", "allocation_block_transfer"),
-                ("FT_MAX_GPU_MEM_FRACTION", "0.3"),
+                ("FT_MAX_GPU_MEM_FRACTION", str(gpu_memory_fraction)),
             )
         )
 
@@ -172,7 +191,6 @@ class TestContribVLLM:
             correctness_check=QWEN_CORRECTNESS,
         )
 
-        assert baseline_memory.weights_memory_gib is not None
         assert memory.weights_memory_gib is not None
         assert 0 < memory.weights_memory_gib < baseline_memory.weights_memory_gib
         assert any("FlexTensor vLLM integration v2 state takeover complete" in line for line in log_lines)
@@ -217,34 +235,42 @@ class TestContribVLLM:
         assert any("FlexTensor vLLM integration v2 state takeover complete" in line for line in log_lines)
         assert any("state takeover installed loader_type=raw_block_transfer" in line for line in log_lines)
 
-    @pytest.mark.gpu_vram_40g
-    def test_v2_no_profile_tp2_serves_after_rank_local_takeover(self, test_output_dir: Path) -> None:
+    @pytest.mark.gpu_vram_min_80g
+    @pytest.mark.gpu_count_min_2
+    @pytest.mark.parametrize("offload_enabled", [False, True], ids=["vanilla", "flextensor"])
+    def test_no_profile_tp2_serves(self, test_output_dir: Path, offload_enabled: bool) -> None:
         if torch.cuda.device_count() < 2:
             pytest.skip("TP=2 acceptance requires two visible CUDA devices")
 
+        # shortcut: CI peer reductions stall; restore NCCL P2P + custom all-reduce after peer-access checks pass.
         case = VllmOffloadSmokeCase(
-            model_name="Qwen/Qwen2.5-7B-Instruct",
+            model_name=QWEN_MODEL,
             output_dir_name="qwen2_5_7b_tp2",
             cli_args=(
-                "--enforce-eager",
+                *QWEN_EAGER_ARGS,
                 "--tensor-parallel-size",
                 "2",
-                "--max-model-len",
-                "256",
-                "--max-num-seqs",
-                "1",
+                "--disable-custom-all-reduce",
             ),
-        ).with_flextensor_offload()
+        ).with_env_vars(("NCCL_P2P_DISABLE", "1"))
+        if offload_enabled:
+            case = case.with_flextensor_offload()
 
         _, metrics, log_lines = run_vllm_server_test(
             case,
             output_dir=test_output_dir / "tp2",
-            correctness_check=VllmCorrectnessCheck(expected_substrings=("Paris",)),
-            server_ready_timeout=1800,
+            correctness_check=QWEN_CORRECTNESS,
+            server_ready_timeout=(
+                _OFFLOAD_SERVER_READY_TIMEOUT_SECONDS if offload_enabled else _SERVER_READY_TIMEOUT_SECONDS
+            ),
         )
 
         assert metrics["usage"].get("completion_tokens", 0) > 0
-        assert sum("FlexTensor vLLM integration v2 state takeover complete" in line for line in log_lines) >= 2
+        takeover_count = sum("FlexTensor vLLM integration v2 state takeover complete" in line for line in log_lines)
+        if offload_enabled:
+            assert takeover_count >= 2
+        else:
+            assert takeover_count == 0
         assert not any("profile.json" in line for line in log_lines)
 
     @pytest.mark.gpu_vram_40g
@@ -273,7 +299,7 @@ class TestContribVLLM:
             case,
             output_dir=test_output_dir / "v2_allocation_compiled",
             correctness_check=QWEN_CORRECTNESS,
-            server_ready_timeout=1800,
+            server_ready_timeout=_OFFLOAD_SERVER_READY_TIMEOUT_SECONDS,
         )
         assert any("CUDAGraphMode.FULL_AND_PIECEWISE" in line for line in log_lines)
         takeover = next(
@@ -313,7 +339,7 @@ class TestContribVLLM:
             base_case,
             output_dir=test_output_dir / "refresh",
             correctness_check=QWEN_CORRECTNESS,
-            server_ready_timeout=1800,
+            server_ready_timeout=_OFFLOAD_SERVER_READY_TIMEOUT_SECONDS,
         )
 
         assert (profile_dir / "profile.json").is_file()
@@ -323,7 +349,7 @@ class TestContribVLLM:
             base_case.with_env_vars(("FT_PROFILE_READ_ONLY", "1")),
             output_dir=test_output_dir / "restart",
             correctness_check=QWEN_CORRECTNESS,
-            server_ready_timeout=1800,
+            server_ready_timeout=_OFFLOAD_SERVER_READY_TIMEOUT_SECONDS,
         )
 
         assert any("saved profile loaded path=" in line for line in restart_logs)

@@ -31,7 +31,128 @@ import pytest
 import torch
 from torch import nn
 
-from flextensor.offload_manager import OffloadConfig, OffloadManager
+from flextensor.offload_manager import OffloadConfig, OffloadManager, OffloadPhase
+from flextensor.tensor_processors import create_model_with_shared_tensors
+
+
+@pytest.mark.parametrize("registrations", [1, 2])
+def test_ring_completion_survives_swaps_and_removal(registrations):
+    original = nn.ModuleList([nn.Identity(), nn.Identity()])
+    profile = create_model_with_shared_tensors(original)
+    manager = OffloadManager("ring-hook-regression")
+    manager._model = profile
+    calls = []
+
+    def completed(*_args):
+        calls.append("complete")
+
+    handles = [profile[-1].register_forward_hook(completed) for _ in range(registrations)]
+    try:
+        for root in (original, profile, original):
+            manager._swap_to_new_model(root, OffloadPhase.INFERENCE)
+            calls.clear()
+            root[-1](torch.ones(1))
+            assert len(calls) == registrations
+        for remaining, handle in zip(reversed(range(registrations)), handles, strict=True):
+            handle.remove()
+            calls.clear()
+            for root in (original, profile):
+                root[-1](torch.ones(1))
+            assert len(calls) == 2 * remaining
+    finally:
+        for handle in handles:
+            handle.remove()
+        manager.release()
+
+
+@pytest.mark.parametrize("register_on_copy", [True, False])
+def test_late_backward_hook_survives_swaps_and_removal(register_on_copy):
+    original = nn.ModuleList([nn.Identity()])
+    profile = create_model_with_shared_tensors(original)
+    manager = OffloadManager("late-backward-hook-regression")
+    manager._model = profile
+    calls = []
+
+    def double_gradient(module, grad_input, _grad_output):
+        calls.append(module)
+        return (grad_input[0] * 2,)
+
+    registered = profile if register_on_copy else original
+    handle = registered[0].register_full_backward_hook(double_gradient)
+    try:
+        for root in (original, profile, original):
+            manager._swap_to_new_model(root, OffloadPhase.INFERENCE)
+            calls.clear()
+            x = torch.ones(1, requires_grad=True)
+            root[0](x).sum().backward()
+            assert calls == [root[0]]
+            torch.testing.assert_close(x.grad, torch.full_like(x, 2))
+        handle.remove()
+        calls.clear()
+        for root in (original, profile):
+            x = torch.ones(1, requires_grad=True)
+            root[0](x).sum().backward()
+            torch.testing.assert_close(x.grad, torch.ones_like(x))
+        assert calls == []
+    finally:
+        handle.remove()
+        manager.release()
+
+
+@pytest.mark.parametrize("shared", [True, False])
+@pytest.mark.parametrize(
+    "register,registry",
+    [
+        ("register_forward_pre_hook", "_forward_pre_hooks"),
+        ("register_full_backward_hook", "_backward_hooks"),
+        ("register_full_backward_pre_hook", "_backward_pre_hooks"),
+    ],
+)
+def test_hook_registry_transfer_preserves_registration(shared, register, registry):
+    original = nn.ModuleList([nn.Identity()])
+    handle = getattr(original[0], register)(lambda *_args: None)
+    target = create_model_with_shared_tensors(original) if shared else nn.ModuleList([nn.Identity()])
+    manager = OffloadManager("registry-regression")
+    try:
+        manager._transfer_hooks(original, target)
+        assert len(getattr(target[0], registry)) == 1
+        handle.remove()
+        assert len(getattr(original[0], registry)) == 0
+        assert len(getattr(target[0], registry)) == (0 if shared else 1)
+    finally:
+        handle.remove()
+        manager.release()
+
+
+@pytest.mark.parametrize("shared", [True, False])
+def test_copied_hooks_preserve_kwargs_and_always_call(shared):
+    class Raising(nn.Module):
+        def forward(self, *, value):
+            raise ValueError(value)
+
+    original = nn.ModuleList([Raising()])
+    calls = []
+
+    def before(_module, args, kwargs):
+        calls.append(("before", args, kwargs))
+
+    def after(_module, args, kwargs, output):
+        assert output is None
+        calls.append(("after", args, kwargs))
+
+    pre = original[0].register_forward_pre_hook(before, with_kwargs=True)
+    post = original[0].register_forward_hook(after, with_kwargs=True, always_call=True)
+    target = create_model_with_shared_tensors(original) if shared else nn.ModuleList([Raising()])
+    manager = OffloadManager("kwargs-regression")
+    try:
+        manager._transfer_hooks(original, target)
+        with pytest.raises(ValueError, match="expected"):
+            target[0](value="expected")
+        assert calls == [("before", (), {"value": "expected"}), ("after", (), {"value": "expected"})]
+    finally:
+        pre.remove()
+        post.remove()
+        manager.release()
 
 
 # Test models

@@ -12,6 +12,7 @@ import signal
 import subprocess  # noqa: S404 - subprocess needed for test utilities
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
@@ -26,6 +27,7 @@ from tests.integration._vllm_utils import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 DEFAULT_VLLM_PORT = 8000
@@ -86,6 +88,8 @@ class VllmCorrectnessCheck:
     seed: int | None = 42
     chat_template_kwargs: dict[str, Any] = field(default_factory=dict)
     case_sensitive: bool = False
+    request_count: int = 1
+    repeat_count: int = 1  # Sequential batches, each with request_count concurrent requests.
 
 
 @dataclass(frozen=True)
@@ -273,7 +277,7 @@ def parse_memory_profiling_logs(log_lines: list[str]) -> MemoryProfilingMetrics:
     return metrics
 
 
-def run_vllm_server_test(
+def run_vllm_server_test(  # noqa: C901 - Keep server and optional sampler lifetimes together.
     case: VllmOffloadSmokeCase,
     output_dir: Path,
     chat_max_tokens: int = 20,
@@ -281,9 +285,15 @@ def run_vllm_server_test(
     correctness_check: VllmCorrectnessCheck | None = None,
     benchmark_config: VllmBenchmarkConfig | None = None,
     server_ready_timeout: int = 600,
+    host_memory_sampler_factory: Callable[[int], Any] | None = None,
 ) -> tuple[MemoryProfilingMetrics, dict, list[str]]:
-    """Run a single vLLM server test and return metrics."""
+    """Run a single vLLM server test and return metrics.
+
+    An optional factory receives the server PID and returns a running sampler
+    with phase(), idle_samples(), and finish(output_path) methods.
+    """
     process = None
+    host_memory = None
     log_lines: list[str] = []
     offload_enabled = case_uses_flextensor_offload(case)
     worker_cls = _cli_arg_value(case.cli_args, "--worker-cls")
@@ -304,6 +314,8 @@ def run_vllm_server_test(
         default_env_vars = (
             ("VLLM_LOGGING_LEVEL", "DEBUG"),
             ("VLLM_NO_USAGE_STATS", "1"),
+            ("NCCL_DEBUG", "INFO"),
+            ("NCCL_DEBUG_SUBSYS", "INIT,NET,GRAPH"),
         )
         offload_output_env_vars = (
             (("FT_INSTRUMENTATION_OUTPUT_DIR", str(instrumentation_dir)),) if offload_enabled else ()
@@ -314,6 +326,8 @@ def run_vllm_server_test(
         )
 
         process, log_lines = start_vllm_server(server_case)
+        if host_memory_sampler_factory is not None:
+            host_memory = host_memory_sampler_factory(process.pid)
         ready = wait_for_server(port=port, timeout=server_ready_timeout, process=process)
 
         assert ready, f"Server failed to start within timeout ({offload_status})"
@@ -330,11 +344,13 @@ def run_vllm_server_test(
         }
         if correctness.chat_template_kwargs:
             chat_request_kwargs["chat_template_kwargs"] = correctness.chat_template_kwargs
-        chat_response = make_chat_request(**chat_request_kwargs)
+        if host_memory is not None:
+            host_memory.phase("warmup")
+        chat_responses = _run_correctness_requests(correctness, chat_request_kwargs)
         request_latency = time.time() - start_time
 
+        chat_response = chat_responses[0]
         response_content = _validated_chat_response_content(chat_response)
-        _assert_correctness_content(response_content, correctness)
 
         print(f"{offload_status} - Chat response: {response_content}")
 
@@ -351,14 +367,11 @@ def run_vllm_server_test(
         assert case.model_name in model_ids, f"Model {case.model_name} not found in {model_ids}"
 
         usage = chat_response.get("usage", {})
-        completion_tokens = usage.get("completion_tokens")
-        assert isinstance(completion_tokens, int) and completion_tokens > 0, (
-            f"completion_tokens must be positive, got {completion_tokens!r}"
-        )
         correctness_metrics = {
             "expected_substrings": list(correctness.expected_substrings),
             "request_latency_seconds": request_latency,
             "response_content": response_content,
+            "responses": chat_responses,
             "usage": usage,
         }
         if correctness.chat_template_kwargs:
@@ -371,6 +384,22 @@ def run_vllm_server_test(
         })
         success = True
 
+        if host_memory is not None:
+            host_memory.idle_samples("warm")
+            host_memory.phase("inference")
+            probe_start = time.monotonic()
+            probe_requests = 0
+            # Keep correctness-checked requests in flight across several memory
+            # samples. This excludes benchmark-client startup from the window.
+            while time.monotonic() - probe_start < 5.0:
+                probe_requests += len(_run_correctness_requests(correctness, chat_request_kwargs))
+            host_memory.idle_samples("post_inference")
+            result_metrics["host_memory_probe"] = {
+                "completed_requests": probe_requests,
+                "concurrency": correctness.request_count,
+            }
+            host_memory.phase("benchmark")
+
         if benchmark_config is not None:
             benchmark_metrics = run_vllm_benchmark(
                 model=case.model_name,
@@ -382,7 +411,11 @@ def run_vllm_server_test(
 
     finally:
         if process is not None:
-            stop_vllm_server(process)
+            try:
+                if host_memory is not None:
+                    result_metrics["host_memory"] = host_memory.finish(output_dir / "host_memory.json")
+            finally:
+                stop_vllm_server(process)
             time.sleep(1)
 
             if success:
@@ -446,6 +479,29 @@ def run_vllm_server_test(
         result_metrics["memory_transfer_validation"] = transfer_validation
 
     return memory_metrics, result_metrics, log_lines
+
+
+def _run_correctness_requests(
+    correctness: VllmCorrectnessCheck,
+    request_kwargs: dict[str, Any],
+) -> list[dict[str, Any]]:
+    assert correctness.repeat_count > 0, "repeat_count must be positive"
+    responses = []
+    for _ in range(correctness.repeat_count):
+        if correctness.request_count == 1:
+            batch = [make_chat_request(**request_kwargs)]
+        else:
+            with ThreadPoolExecutor(max_workers=correctness.request_count) as pool:
+                pending = [pool.submit(make_chat_request, **request_kwargs) for _ in range(correctness.request_count)]
+                batch = [request.result() for request in pending]
+        for response in batch:
+            _assert_correctness_content(_validated_chat_response_content(response), correctness)
+            completion_tokens = response.get("usage", {}).get("completion_tokens")
+            assert isinstance(completion_tokens, int) and completion_tokens > 0, (
+                f"completion_tokens must be positive, got {completion_tokens!r}"
+            )
+        responses.extend(batch)
+    return responses
 
 
 def _validated_chat_response_content(chat_response: dict[str, Any]) -> str:

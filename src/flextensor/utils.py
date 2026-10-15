@@ -3,6 +3,7 @@
 
 import json
 import logging
+import math
 import pathlib
 import re
 import tempfile
@@ -62,6 +63,52 @@ def get_tensor_data(tensor: torch.Tensor) -> torch.Tensor:
 def set_tensor_data(tensor: torch.Tensor, replacement: torch.Tensor) -> None:
     """Replace tensor data while bypassing subclass property overrides."""
     cast("Any", torch.Tensor.data).__set__(tensor, replacement)
+
+
+def _torch_dtype_name(dtype: torch.dtype) -> str:
+    """Return the canonical JSON representation for a torch dtype."""
+    rendered = str(dtype)
+    if not rendered.startswith("torch."):
+        raise ValueError(f"Unsupported torch dtype representation: {rendered!r}")
+    return rendered.removeprefix("torch.")
+
+
+def _parse_torch_dtype_name(value: Any) -> torch.dtype:
+    """Parse a dtype name or PyTorch alias without evaluating arbitrary input."""
+    if not isinstance(value, str) or not value:
+        raise ValueError("dtype must be a non-empty string")
+    dtype = getattr(torch, value, None)
+    if not isinstance(dtype, torch.dtype):
+        raise ValueError(f"unsupported dtype {value!r}")
+    return dtype
+
+
+def _is_non_overlapping_dense(shape: tuple[int, ...], stride: tuple[int, ...]) -> bool:
+    """Return whether a non-negative strided layout is packed without overlap or gaps."""
+    if math.prod(shape) == 0:
+        return True
+    expected_stride = 1
+    for size, step in sorted(
+        ((size, step) for size, step in zip(shape, stride, strict=True) if size > 1),
+        key=lambda item: item[1],
+    ):
+        if step != expected_stride:
+            return False
+        expected_stride *= size
+    return True
+
+
+def _parse_dense_tensor_layout(shape: Any, stride: Any) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Parse JSON shape/stride lists describing a packed, non-overlapping tensor."""
+    for field_name, value in (("shape", shape), ("stride", stride)):
+        if not isinstance(value, list) or any(type(item) is not int or item < 0 for item in value):
+            raise ValueError(f"{field_name} must contain non-negative integers")
+    shape, stride = tuple(shape), tuple(stride)
+    if len(shape) != len(stride):
+        raise ValueError("shape/stride rank mismatch")
+    if not _is_non_overlapping_dense(shape, stride):
+        raise ValueError("tensor layout must be non-overlapping and dense")
+    return shape, stride
 
 
 def _compute_packed_byte_layout(

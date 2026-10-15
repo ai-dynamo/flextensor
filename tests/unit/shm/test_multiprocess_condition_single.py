@@ -4,11 +4,16 @@
 
 import contextlib
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from multiprocessing.shared_memory import SharedMemory
+from pathlib import Path
 
 import posix_ipc
 import pytest
 
+import flextensor.shm.multiprocess_condition as condition_module
 from flextensor.shm import MultiprocessCondition, ProcessFileLock, SemaphoreLock
 
 
@@ -95,6 +100,81 @@ class TestMultiprocessConditionSingle:
 
         condition.close()
         condition.unlink()
+
+    @pytest.mark.parametrize("lock_class", [SemaphoreLock, ProcessFileLock])
+    def test_notify_ready_signals_every_registration_for_one_process(self, lock_class):
+        condition = MultiprocessCondition(name=self.test_name, is_creator=True, lock_class=lock_class)
+        waiter = SemaphoreLock(f"{self.test_name}_{os.getpid()}", locked=True)
+        try:
+            with condition.lock:
+                condition.notification_list.append(str(os.getpid()))
+                condition.notification_list.append(str(os.getpid()))
+
+            condition.notify_ready()
+
+            waiter.acquire(non_blocking=True)
+            waiter.acquire(non_blocking=True)
+            with pytest.raises(posix_ipc.ExistentialError):
+                posix_ipc.Semaphore(waiter.name).close()
+        finally:
+            waiter.unlink()
+            waiter.close()
+            condition.unlink()
+
+    @pytest.mark.parametrize("lock_class", [SemaphoreLock, ProcessFileLock])
+    def test_ready_waiter_leaves_semaphore_name_for_notifier(self, monkeypatch, lock_class):
+        """A waiter may observe readiness before the notifier opens its semaphore."""
+        condition = MultiprocessCondition(name=self.test_name, is_creator=True, lock_class=lock_class)
+        append = condition.notification_list.append
+
+        def ready_after_registration(pid):
+            append(pid)
+            condition.notification_list.set_ready()
+
+        monkeypatch.setattr(condition.notification_list, "append", ready_after_registration)
+        try:
+            condition.wait_for_ready()
+
+            waiter_name = f"/{self.test_name}_{os.getpid()}"
+            posix_ipc.Semaphore(waiter_name).close()
+            condition.notify_ready()
+            with pytest.raises(posix_ipc.ExistentialError):
+                posix_ipc.Semaphore(waiter_name).close()
+        finally:
+            condition.unlink()
+
+    @pytest.mark.parametrize("lock_class", [SemaphoreLock, ProcessFileLock])
+    def test_same_process_waiters_register_and_wake_together(self, monkeypatch, lock_class):
+        """Two local waiters must register without blocking the notifier's lock."""
+        acquire = SemaphoreLock.acquire
+
+        def bounded_acquire(self, non_blocking=False, timeout=None):
+            return acquire(self, non_blocking=non_blocking, timeout=5.0 if timeout is None else timeout)
+
+        # Bound real semaphore waits so a regression cannot hang the test runner.
+        monkeypatch.setattr(SemaphoreLock, "acquire", bounded_acquire)
+        condition = MultiprocessCondition(name=self.test_name, is_creator=True, lock_class=lock_class)
+        registered = threading.Event()
+        append = condition.notification_list.append
+
+        def record_registration(pid):
+            append(pid)
+            if len(condition.notification_list.get_list()) == 2:
+                registered.set()
+
+        monkeypatch.setattr(condition.notification_list, "append", record_registration)
+        try:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                waiters = [executor.submit(condition.wait_for_ready) for _ in range(2)]
+                assert registered.wait(timeout=5), "Both waiters must register before notification"
+
+                condition.notify_ready()
+
+                for waiter in waiters:
+                    waiter.result(timeout=5)
+            assert condition.notification_list.get_list() == [str(os.getpid())] * 2
+        finally:
+            condition.unlink()
 
     @pytest.mark.parametrize("lock_class", [SemaphoreLock, ProcessFileLock])
     def test_wait_for_ready_immediate(self, lock_class):
@@ -236,6 +316,32 @@ class TestMultiprocessConditionSingle:
         with pytest.raises((FileNotFoundError, ValueError)):
             MultiprocessCondition(name=self.test_name, is_creator=False, lock_class=lock_class)
 
+    @pytest.mark.parametrize("lock_class", [SemaphoreLock, ProcessFileLock])
+    def test_unlink_names_keeps_local_handles_open(self, lock_class):
+        """Global names disappear while the existing mapping and lock stay usable."""
+        condition = MultiprocessCondition(name=self.test_name, is_creator=True, lock_class=lock_class)
+
+        try:
+            condition.unlink_names()
+
+            assert condition.notification_list is not None
+            assert condition.lock is not None
+            with pytest.raises(FileNotFoundError):
+                SharedMemory(name=self.test_name, create=False).close()
+            if isinstance(condition.lock, SemaphoreLock):
+                with pytest.raises(posix_ipc.ExistentialError):
+                    posix_ipc.Semaphore(condition.lock.name).close()
+            else:
+                with pytest.raises(FileNotFoundError), Path(condition.lock.path).open("rb"):
+                    pass
+
+            condition.lock.acquire(non_blocking=True)
+            condition.lock.release()
+            condition.notification_list.set_ready()
+            assert condition.notification_list.is_ready()
+        finally:
+            condition.unlink()
+
     def test_unlink_closes_semaphore_lock_handle(self):
         """Unlinking a condition must not leave its semaphore handle usable."""
         condition = MultiprocessCondition(name=self.test_name, is_creator=True, lock_class=SemaphoreLock)
@@ -251,17 +357,111 @@ class TestMultiprocessConditionSingle:
                 lock.close()
 
     @pytest.mark.parametrize("lock_class", [SemaphoreLock, ProcessFileLock])
-    def test_unlink_after_close_is_noop(self, lock_class):
-        """Test that unlink after close is a no-op (does not raise)."""
+    def test_unlink_after_close_removes_names(self, lock_class):
+        """Closing local handles must not prevent a later unlink."""
         condition = MultiprocessCondition(name=self.test_name, is_creator=True, lock_class=lock_class)
+        lock = condition.lock
 
-        condition.close()
-        condition.unlink()  # Should not raise exception, but is a no-op
+        try:
+            condition.close()
+            condition.unlink()
 
-        # Shared memory still exists, so reconnection should succeed
-        condition2 = MultiprocessCondition(name=self.test_name, is_creator=False, lock_class=lock_class)
-        condition2.close()
-        condition2.unlink()
+            with pytest.raises(FileNotFoundError):
+                SharedMemory(name=self.test_name, create=False).close()
+            if isinstance(lock, SemaphoreLock):
+                with pytest.raises(posix_ipc.ExistentialError):
+                    posix_ipc.Semaphore(lock.name).close()
+            else:
+                with pytest.raises(FileNotFoundError), Path(lock.path).open("rb"):
+                    pass
+        finally:
+            condition.unlink()
+
+    def test_constructor_rolls_back_created_notification_list_when_lock_fails(self):
+        """A failed lock constructor must not strand its newly created SHM name."""
+
+        class FailingLock(ProcessFileLock):
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError("lock failed")
+
+        with pytest.raises(RuntimeError, match="lock failed"):
+            MultiprocessCondition(name=self.test_name, is_creator=True, lock_class=FailingLock)
+
+        with pytest.raises(FileNotFoundError):
+            SharedMemory(name=self.test_name, create=False)
+
+    def test_notify_ready_does_not_recreate_a_vanished_waiter(self):
+        """Stale waiter entries are benign and cannot recreate semaphore names."""
+        condition = MultiprocessCondition(name=self.test_name, is_creator=True)
+        condition.notification_list.append("gone")
+
+        try:
+            condition.notify_ready()
+
+            with pytest.raises(posix_ipc.ExistentialError):
+                posix_ipc.Semaphore(f"/{self.test_name}_gone")
+        finally:
+            condition.unlink()
+
+    @pytest.mark.parametrize("failure_stage", ["signal", "close"])
+    def test_notify_ready_finishes_other_deliveries_before_raising(  # noqa: C901
+        self,
+        monkeypatch,
+        failure_stage,
+    ):
+        """One failed waiter cannot prevent later waiters from being notified."""
+        condition = MultiprocessCondition.__new__(MultiprocessCondition)
+        condition.name = self.test_name
+        events = []
+
+        class NotificationList:
+            ready = False
+
+            def set_ready(self):
+                self.ready = True
+
+            def get_list(self):
+                return ["bad", "good"]
+
+        class Lock:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                return False
+
+        class NotificationLock:
+            def __init__(self, name, *, locked, create):
+                assert locked is False
+                assert create is False
+                self.name = name
+                events.append((name, "attach"))
+
+            def signal(self):
+                events.append((self.name, "signal"))
+                if self.name.endswith("_bad") and failure_stage == "signal":
+                    raise OSError("signal failed")
+
+            def unlink_name(self):
+                events.append((self.name, "unlink"))
+
+            def close(self):
+                events.append((self.name, "close"))
+                if self.name.endswith("_bad") and failure_stage == "close":
+                    raise OSError("close failed")
+
+        condition.notification_list = NotificationList()
+        condition.lock = Lock()
+        monkeypatch.setattr(condition_module, "SemaphoreLock", NotificationLock)
+
+        with pytest.raises(OSError, match=failure_stage):
+            condition.notify_ready()
+
+        assert condition.notification_list.ready
+        good_name = f"{self.test_name}_good"
+        assert (good_name, "signal") in events
+        assert (good_name, "unlink") in events
+        assert (good_name, "close") in events
 
     @pytest.mark.parametrize("lock_class", [SemaphoreLock, ProcessFileLock])
     def test_close_lock_functionality(self, lock_class):
@@ -269,6 +469,7 @@ class TestMultiprocessConditionSingle:
         condition = MultiprocessCondition(name=self.test_name, is_creator=True, lock_class=lock_class)
 
         assert condition.lock is not None
+        lock = condition.lock
 
         # Close semaphore specifically
         condition.close_lock()
@@ -281,6 +482,11 @@ class TestMultiprocessConditionSingle:
 
         condition.close()
         condition.unlink()
+        if isinstance(lock, SemaphoreLock):
+            with pytest.raises(posix_ipc.ExistentialError):
+                posix_ipc.Semaphore(lock.name)
+        else:
+            assert not Path(lock.path).exists()
 
     @pytest.mark.parametrize("lock_class", [SemaphoreLock, ProcessFileLock])
     @pytest.mark.parametrize("create_flag", [True, False])

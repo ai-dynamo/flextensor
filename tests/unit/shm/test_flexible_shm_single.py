@@ -10,7 +10,49 @@ from unittest import mock
 import pytest
 
 from flextensor.shm import FlexibleSharedMemory, ProcessFileLock, SemaphoreLock
-from flextensor.shm.flexible_shm import KeepAlive
+from flextensor.shm.flexible_shm import KeepAlive, _unlink_untracked_shm
+
+
+def test_unlink_untracked_shm_balances_registration_if_peer_removed_name():
+    """A second handle finding an absent name must undo its manual registration."""
+    from multiprocessing.shared_memory import SharedMemory
+
+    owner = SharedMemory(create=True, size=1)
+    peer = SharedMemory(name=owner.name)
+    try:
+        owner.unlink()
+        with (
+            mock.patch("flextensor.shm.flexible_shm.resource_tracker_register") as register,
+            mock.patch("flextensor.shm.flexible_shm.resource_tracker_unregister") as unregister,
+        ):
+            _unlink_untracked_shm(peer)
+
+        register.assert_called_once_with(peer._name, "shared_memory")
+        unregister.assert_called_once_with(peer._name, "shared_memory")
+    finally:
+        owner.close()
+        peer.close()
+
+
+def test_unlink_untracked_shm_balances_registration_before_reraising():
+    """Unexpected unlink errors are reported after undoing the manual registration."""
+    from multiprocessing.shared_memory import SharedMemory
+
+    shm = SharedMemory(create=True, size=1)
+    try:
+        with (
+            mock.patch.object(SharedMemory, "unlink", side_effect=OSError("unlink failed")),
+            mock.patch("flextensor.shm.flexible_shm.resource_tracker_register") as register,
+            mock.patch("flextensor.shm.flexible_shm.resource_tracker_unregister") as unregister,
+            pytest.raises(OSError, match="unlink failed"),
+        ):
+            _unlink_untracked_shm(shm)
+
+        register.assert_called_once_with(shm._name, "shared_memory")
+        unregister.assert_called_once_with(shm._name, "shared_memory")
+    finally:
+        shm.unlink()
+        shm.close()
 
 
 class TestFlexibleSharedMemorySingle:
@@ -26,14 +68,12 @@ class TestFlexibleSharedMemorySingle:
             self.test_name,  # Main shared memory
             "sm_" + self.test_name + "_kd",  # Keep alive dict (SharedMemoryDict adds sm_ prefix)
             self.test_name + "_km",  # Keep alive timestamps array
-            self.test_name + "_c",  # Condition notification list
         ]
 
         # Semaphores / lock names created by FlexibleSharedMemory
         self.semaphore_names = [
             self.test_name,  # Main lock
             self.test_name + "_ks",  # Keep alive lock
-            self.test_name + "_c",  # Condition lock
         ]
 
         self.test_size = 1024 * 4  # 4KB for tests
@@ -94,7 +134,7 @@ class TestFlexibleSharedMemorySingle:
             name=self.test_name,
             shm_size=self.test_size,
             keep_alive_seconds=2,  # Short interval for faster test cleanup
-            pinned_memory=False,  # Avoid cupy dependency in basic test
+            pinned_memory=False,  # Keep this basic test independent of CUDA.
             lock_class=lock_class,
         )
 
@@ -105,7 +145,6 @@ class TestFlexibleSharedMemorySingle:
         assert fsm.shm_creator is True  # Should be creator in single process
         assert fsm.shm is not None
         assert fsm.keep_alive is not None
-        assert fsm.notification_condition is not None
         assert fsm.main_lock is not None
 
         fsm.close()
@@ -198,53 +237,62 @@ class TestFlexibleSharedMemorySingle:
         assert fsm.keep_alive is not None
         assert fsm.keep_alive.any_process_alive() is True
 
-        # Process should be in keep alive dictionary (process_id is an integer)
+        # This handle's participant identity should be registered.
         with fsm.keep_alive.lock:
-            assert fsm.pid in fsm.keep_alive.keep_alive_dict
+            assert fsm.participant_id in fsm.keep_alive.keep_alive_dict
 
         fsm.close()
 
-    def test_try_acquire_lock_keeps_reference_across_retries(self):
-        """A concurrent close cannot replace the lock between retry attempts."""
-        fsm = FlexibleSharedMemory.__new__(FlexibleSharedMemory)
+    def test_same_process_handles_have_independent_participants(self):
+        """Closing one handle must not withdraw another handle's heartbeat."""
+        first = FlexibleSharedMemory(name=self.test_name, shm_size=self.test_size)
+        second = FlexibleSharedMemory(name=self.test_name, shm_size=self.test_size)
+        try:
+            assert first.participant_id != second.participant_id
+            first.close()
+            assert second.keep_alive is not None
+            with second.keep_alive.lock:
+                assert first.participant_id not in second.keep_alive.keep_alive_dict
+                assert second.participant_id in second.keep_alive.keep_alive_dict
+        finally:
+            if not first._closed:
+                first.close()
+            second.close()
 
-        class ClosingRaceLock:
-            attempts = 0
+    def test_pinned_mapping_uses_host_pin_registry(self, monkeypatch):
+        """Pinned mappings are registered and released with the shared helper."""
+        pin = mock.MagicMock()
+        release = mock.MagicMock()
+        monkeypatch.setattr("flextensor.shm.flexible_shm.HostPinRegistry.pin_in_place", pin)
+        monkeypatch.setattr("flextensor.shm.flexible_shm.HostPinRegistry.release_all", release)
 
-            def acquire(self, *, non_blocking):
-                assert non_blocking
-                self.attempts += 1
-                fsm.main_lock = None
-                if self.attempts == 1:
-                    raise BlockingIOError
+        fsm = FlexibleSharedMemory(name=self.test_name, shm_size=self.test_size, pinned_memory=True)
+        pin.assert_called_once()
 
-        fsm.main_lock = ClosingRaceLock()
+        fsm.close()
+        release.assert_called_once_with()
 
-        assert fsm._try_acquire_lock(max_attempts=2)
-
-    def test_notification_condition_integration(self):
-        """Test integration with MultiprocessCondition."""
-        fsm = FlexibleSharedMemory(
+    def test_creator_initializer_runs_only_for_creator(self):
+        """Followers attach only after the creator has initialized its mapping."""
+        creator_initializer = mock.MagicMock(side_effect=lambda shm: shm.block.buf.__setitem__(0, 42))
+        follower_initializer = mock.MagicMock()
+        creator = FlexibleSharedMemory(
             name=self.test_name,
             shm_size=self.test_size,
-            keep_alive_seconds=2,  # Short interval for faster test cleanup
-            pinned_memory=False,
+            _creator_initializer=creator_initializer,
         )
-
-        # Should initially not be ready
-        assert not fsm.notification_condition.notification_list.is_ready()
-
-        # Should be able to notify ready
-        fsm.notify_ready()
-        assert fsm.notification_condition.notification_list.is_ready()
-
-        # wait_for_ready should return immediately now
-        start_time = time.time()
-        fsm.wait_for_ready()
-        wait_time = time.time() - start_time
-        assert wait_time < 0.1  # Should be very fast
-
-        fsm.close()
+        follower = FlexibleSharedMemory(
+            name=self.test_name,
+            shm_size=self.test_size,
+            _creator_initializer=follower_initializer,
+        )
+        try:
+            creator_initializer.assert_called_once_with(creator)
+            follower_initializer.assert_not_called()
+            assert follower.block.buf[0] == 42
+        finally:
+            follower.close()
+            creator.close()
 
     @pytest.mark.parametrize("lock_class", [SemaphoreLock, ProcessFileLock])
     def test_semaphore_protection(self, lock_class):
@@ -273,21 +321,17 @@ class TestFlexibleSharedMemorySingle:
         fsm.close()
 
     def test_pinned_memory_unavailable(self):
-        """Test behavior when cupy is not available for pinned memory."""
-        # Test that we can create FSM even if pinned memory is requested but cupy fails
-        # This will attempt to use pinned memory, but if cupy is not available it should handle gracefully
-        # For this test, we just verify basic creation works with pinned_memory=False
+        """Unpinned mappings do not require CUDA host registration."""
         fsm = FlexibleSharedMemory(
             name=self.test_name,
             shm_size=self.test_size,
             keep_alive_seconds=2,  # Short interval for faster test cleanup
-            pinned_memory=False,  # Use False for this test to avoid cupy dependency
+            pinned_memory=False,
         )
 
         # Should create successfully without pinned memory
         assert fsm.shm is not None
-        assert fsm.shm_ptr is None  # Should be None without pinned memory
-        assert fsm.c_buf is None
+        assert fsm._host_pin_registry is None
 
         fsm.close()
 
@@ -377,14 +421,12 @@ class TestFlexibleSharedMemorySingle:
                 instance_name,
                 "sm_" + instance_name + "_kd",
                 instance_name + "_km",
-                instance_name + "_c",
             ]
 
             # Semaphores / lock names for this instance
             sem_names = [
                 instance_name,
                 instance_name + "_ks",
-                instance_name + "_c",
             ]
 
             # Clean up semaphores

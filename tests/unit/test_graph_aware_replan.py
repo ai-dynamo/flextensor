@@ -487,8 +487,68 @@ class TestGraphAwareReplanRebuild:
         assert manager._manual_update_state is False  # noqa: SLF001
         assert any("no enabled offload-timing collector" in r.message for r in caplog.records)
 
+    def test_manual_update_replan_refuses_while_tail_in_flight(
+        self, manager: OffloadManager, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A repeated manual request must not reset the in-flight measurement."""
+        from flextensor.offload_manager import OffloadPhase
+
+        manager._current_phase = OffloadPhase.INFERENCE  # noqa: SLF001
+        manager.config = SimpleNamespace(offload_timing="cuda_graph", profiling_iters=2)
+        self._attach_collector(manager)
+
+        with (
+            patch.object(manager, "reset_offload_timing"),
+            patch.object(manager, "_arm_offload_timing_after_capture"),
+        ):
+            assert manager.request_strategy_replan(manual_update_state=True) == 2
+        manager._compiled.measure_seen = 1  # noqa: SLF001
+
+        with (
+            patch.object(manager, "reset_offload_timing") as reset,
+            patch.object(manager._compiled, "arm_replan_tail") as arm_tail,
+            caplog.at_level("WARNING"),
+        ):
+            assert manager.request_strategy_replan(manual_update_state=True) == 0
+
+        reset.assert_not_called()
+        arm_tail.assert_not_called()
+        assert manager._compiled.measure_seen == 1  # noqa: SLF001
+        assert any("already in flight" in r.message for r in caplog.records)
+
+    def test_manual_update_replan_refuses_after_failure(
+        self, manager: OffloadManager, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Re-arming would drop the failure that marks inference unsafe."""
+        from flextensor.compile.warmup_tail import CompiledOffloadTailState
+        from flextensor.offload_manager import OffloadPhase
+
+        manager._current_phase = OffloadPhase.INFERENCE  # noqa: SLF001
+        manager.config = SimpleNamespace(offload_timing="cuda_graph", profiling_iters=2)
+        self._attach_collector(manager)
+        failure = RuntimeError("rebuild exploded")
+        manager._compiled.tail_state = CompiledOffloadTailState.FAILED  # noqa: SLF001
+        manager._compiled.tail_failure = failure  # noqa: SLF001
+
+        with (
+            patch.object(manager, "reset_offload_timing") as reset,
+            patch.object(manager._compiled, "arm_replan_tail") as arm_tail,
+            caplog.at_level("WARNING"),
+        ):
+            assert manager.request_strategy_replan(manual_update_state=True) == 0
+
+        reset.assert_not_called()
+        arm_tail.assert_not_called()
+        assert manager._manual_update_state is False  # noqa: SLF001
+        assert manager._compiled.tail_state == CompiledOffloadTailState.FAILED  # noqa: SLF001
+        assert manager._compiled.tail_failure is failure  # noqa: SLF001
+        assert any("an earlier replan failed" in r.message for r in caplog.records)
+
     def test_manual_update_replan_arms_without_compiled_profiling(self, manager: OffloadManager) -> None:
         """CUDA-graph budgets come from offload timing — custom-op profiling stays off."""
+        from flextensor.offload_manager import OffloadPhase
+
+        manager._current_phase = OffloadPhase.INFERENCE  # noqa: SLF001
         manager.config = SimpleNamespace(offload_timing="cuda_graph", profiling_iters=2)
         self._attach_collector(manager)
 

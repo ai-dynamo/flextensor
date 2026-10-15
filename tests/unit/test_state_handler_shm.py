@@ -57,6 +57,95 @@ class TestStateHandlerShm:
         assert saved_state["version"] == 3
         assert TensorManagerState.from_dict(saved_state).to_dict() == saved_state
 
+    def test_legacy_v3_without_managed_tensor_metadata_still_loads(self):
+        saved_state = _make_minimal_state().to_dict()
+        saved_state.pop("managed_tensor_dtypes")
+        saved_state.pop("managed_tensor_layouts")
+
+        loaded = TensorManagerState.from_dict(saved_state)
+
+        assert loaded.managed_tensor_dtypes == {}
+        assert loaded.managed_tensor_layouts == {}
+
+    @pytest.mark.parametrize(
+        "first_layout",
+        [
+            {"shape": [16, 16], "stride": [1, 16]},
+            {"shape": [16, 16], "stride": [16, 1]},
+            {"shape": [1, 256], "stride": [0, 1]},
+            {"shape": [4, 4, 16], "stride": [4, 1, 16]},
+        ],
+    )
+    def test_mixed_managed_dtypes_roundtrip(self, first_layout):
+        state = _make_minimal_state()
+        state.managed_tensor_dtypes = {
+            "layer0.weight": "float32",
+            "layer1.weight": "bfloat16",
+            "layer2.weight": "float8_e4m3fn",
+        }
+        state.managed_tensor_layouts = {
+            "layer0.weight": first_layout,
+            "layer1.weight": {"shape": [32, 32], "stride": [32, 1]},
+            "layer2.weight": {"shape": [512], "stride": [1]},
+        }
+
+        loaded = TensorManagerStateHandler.load_state_from_bytes(TensorManagerStateHandler.save_state_to_bytes(state))
+
+        assert loaded.managed_tensor_dtypes == state.managed_tensor_dtypes
+        assert loaded.managed_tensor_layouts == state.managed_tensor_layouts
+
+    def test_partial_managed_layout_map_is_rejected(self):
+        saved_state = _make_minimal_state().to_dict()
+        saved_state["managed_tensor_layouts"] = {"layer0.weight": {"shape": [256], "stride": [1]}}
+
+        with pytest.raises(ValueError, match=r"managed_tensor_layouts.*cover every managed tensor"):
+            TensorManagerState.from_dict(saved_state)
+
+    @pytest.mark.parametrize(
+        "layout",
+        [
+            {"shape": [256]},
+            {"shape": [16, 16], "stride": [1]},
+            {"shape": [-256], "stride": [1]},
+            {"shape": [256], "stride": [-1]},
+            {"shape": [256], "stride": [2]},
+            {"shape": [256], "stride": [0]},
+            {"shape": [True], "stride": [1]},
+            {"shape": [256], "stride": [True]},
+            {"shape": [3, 3], "stride": [2, 2]},
+            {"shape": [1, 256], "stride": [2**64, 1]},
+        ],
+    )
+    def test_invalid_managed_layout_is_rejected(self, layout):
+        saved_state = _make_minimal_state().to_dict()
+        saved_state["managed_tensor_layouts"] = {
+            "layer0.weight": layout,
+            "layer1.weight": {"shape": [512], "stride": [1]},
+            "layer2.weight": {"shape": [128], "stride": [1]},
+        }
+
+        with pytest.raises(ValueError, match=r"invalid layout metadata"):
+            TensorManagerState.from_dict(saved_state)
+
+    def test_partial_managed_dtype_map_is_rejected(self):
+        saved_state = _make_minimal_state().to_dict()
+        saved_state["managed_tensor_dtypes"] = {"layer0.weight": "float32"}
+
+        with pytest.raises(ValueError, match=r"managed_tensor_dtypes.*cover every managed tensor"):
+            TensorManagerState.from_dict(saved_state)
+
+    @pytest.mark.parametrize("dtype_name", ["not_a_torch_dtype", "Tensor", "", "float"])
+    def test_invalid_managed_dtype_is_rejected(self, dtype_name):
+        saved_state = _make_minimal_state().to_dict()
+        saved_state["managed_tensor_dtypes"] = {
+            "layer0.weight": "float32",
+            "layer1.weight": dtype_name,
+            "layer2.weight": "float32",
+        }
+
+        with pytest.raises(ValueError, match=r"invalid dtype metadata for 'layer1.weight'"):
+            TensorManagerState.from_dict(saved_state)
+
     def test_roundtrip_to_bytes(self):
         """State survives serialization to bytes and back."""
         state = _make_minimal_state()

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -135,6 +136,8 @@ def test_run_vllm_server_test_uses_case_cli_args_without_injecting_enforce_eager
     assert dict(started_cases[0].extra_env_vars) == {
         "VLLM_LOGGING_LEVEL": "DEBUG",
         "VLLM_NO_USAGE_STATS": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "INIT,NET,GRAPH",
     }
     assert metrics["offload_enabled"] is False
 
@@ -290,6 +293,7 @@ def test_run_vllm_server_test_uses_configured_correctness_check(monkeypatch, tmp
         "expected_substrings": ["blue"],
         "request_latency_seconds": pytest.approx(metrics["request_latency_seconds"]),
         "response_content": "blue",
+        "responses": [{"choices": [{"message": {"content": "blue"}}], "usage": {"completion_tokens": 1}}],
         "usage": {"completion_tokens": 1},
     }
     assert metrics["response_content"] == "blue"
@@ -335,6 +339,60 @@ def test_run_vllm_server_test_default_correctness_allows_any_non_empty_response(
 
     assert metrics["response_content"] == "The"
     assert metrics["correctness"]["expected_substrings"] == []
+
+
+@pytest.mark.parametrize("wrong_response", [None, 0, 1])
+def test_concurrent_correctness_checks_validate_every_response(monkeypatch, tmp_path, wrong_response) -> None:
+    case = _smoke_case()
+    _patch_successful_vllm_server(monkeypatch, case)
+    both_requests_started = threading.Barrier(2)
+
+    def respond(**_kwargs):
+        index = both_requests_started.wait(timeout=5)
+        return {
+            "choices": [{"message": {"content": "London" if index == wrong_response else "Paris"}}],
+            "usage": {"completion_tokens": 1},
+        }
+
+    monkeypatch.setattr(_vllm_server, "make_chat_request", respond)
+    correctness = VllmCorrectnessCheck(expected_substrings=("Paris",), request_count=2)
+    if wrong_response is not None:
+        with pytest.raises(AssertionError, match="expected substring"):
+            run_vllm_server_test(case, output_dir=tmp_path, correctness_check=correctness)
+    else:
+        _, metrics, _ = run_vllm_server_test(case, output_dir=tmp_path, correctness_check=correctness)
+        assert len(metrics["correctness"]["responses"]) == 2
+
+
+@pytest.mark.parametrize("wrong_response", [None, 4, 5])
+def test_repeated_concurrent_correctness_checks_validate_later_batches(monkeypatch, tmp_path, wrong_response) -> None:
+    case = _smoke_case()
+    _patch_successful_vllm_server(monkeypatch, case)
+    monkeypatch.setattr(_vllm_server.time, "sleep", lambda _seconds: None)
+    both_requests_started = threading.Barrier(2)
+    request_lock = threading.Lock()
+    request_count = 0
+
+    def respond(**_kwargs):
+        nonlocal request_count
+        both_requests_started.wait(timeout=5)
+        with request_lock:
+            index = request_count
+            request_count += 1
+        return {
+            "choices": [{"message": {"content": "London" if index == wrong_response else "Paris"}}],
+            "usage": {"completion_tokens": 8},
+        }
+
+    monkeypatch.setattr(_vllm_server, "make_chat_request", respond)
+    correctness = VllmCorrectnessCheck(expected_substrings=("Paris",), request_count=2, repeat_count=3)
+    if wrong_response is not None:
+        with pytest.raises(AssertionError, match="expected substring"):
+            run_vllm_server_test(case, output_dir=tmp_path, correctness_check=correctness)
+    else:
+        _, metrics, _ = run_vllm_server_test(case, output_dir=tmp_path, correctness_check=correctness)
+        assert len(metrics["correctness"]["responses"]) == 6
+    assert request_count == 6
 
 
 def test_run_vllm_server_test_runs_optional_benchmark(monkeypatch, tmp_path) -> None:
@@ -749,3 +807,41 @@ def test_make_chat_request_posts_chat_template_kwargs_when_configured(monkeypatc
     )
 
     assert observed["json"]["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+@pytest.mark.parametrize("ready", [True, False])
+def test_host_memory_sampling_finishes_before_server_shutdown(monkeypatch, tmp_path, ready):
+    from unittest.mock import Mock
+
+    case = _smoke_case()
+    _patch_successful_vllm_server(monkeypatch, case)
+    original_start = _vllm_server.start_vllm_server
+
+    def start(case):
+        process, logs = original_start(case)
+        process.pid = 123
+        return process, logs
+
+    sampler = Mock()
+    sampler.finish.return_value = {"phases": {}, "failure": None}
+    factory = Mock(return_value=sampler)
+    monkeypatch.setattr(_vllm_server, "start_vllm_server", start)
+    monkeypatch.setattr(_vllm_server, "wait_for_server", lambda **_kwargs: ready)
+    monkeypatch.setattr(_vllm_server.time, "monotonic", Mock(side_effect=[0, 0, 6]))
+    monkeypatch.setattr(_vllm_server.time, "sleep", lambda _seconds: None)
+
+    def stop(_process):
+        sampler.finish.assert_called_once_with(tmp_path / "host_memory.json")
+
+    monkeypatch.setattr(_vllm_server, "stop_vllm_server", stop)
+    if ready:
+        _, metrics, _ = run_vllm_server_test(case, tmp_path, host_memory_sampler_factory=factory)
+        assert metrics["host_memory"] is sampler.finish.return_value
+        assert metrics["host_memory_probe"] == {"completed_requests": 1, "concurrency": 1}
+        assert [call.args[0] for call in sampler.phase.call_args_list] == ["warmup", "inference", "benchmark"]
+        assert [call.args[0] for call in sampler.idle_samples.call_args_list] == ["warm", "post_inference"]
+    else:
+        with pytest.raises(AssertionError, match="Server failed to start"):
+            run_vllm_server_test(case, tmp_path, host_memory_sampler_factory=factory)
+    factory.assert_called_once_with(123)
+    sampler.finish.assert_called_once()

@@ -8,6 +8,7 @@ import importlib
 import logging
 import sys
 import types
+from dataclasses import dataclass
 from types import SimpleNamespace
 from weakref import ref
 
@@ -157,6 +158,25 @@ def test_bootstrap_preserves_preexisting_buffer_view_during_weight_load(bootstra
 
     assert unit.weight.untyped_storage()._cdata == unit.weight_view.untyped_storage()._cdata
     torch.testing.assert_close(unit.weight_view, torch.arange(8, dtype=torch.float32).view(4, 2))
+
+
+def test_bootstrap_preserves_tensor_alias_nested_in_quant_config_dataclasses(bootstrap_module) -> None:
+    @dataclass
+    class QuantDesc:
+        scale: torch.Tensor
+
+    @dataclass
+    class QuantConfig:
+        weight: QuantDesc
+
+    unit = nn.Module()
+    unit.weight = nn.Parameter(torch.arange(8, dtype=torch.float32).view(2, 4))
+    cached_scale = unit.weight.view(4, 2)
+    unit.quant_method = SimpleNamespace(moe_quant_config=QuantConfig(QuantDesc(cached_scale)))
+
+    bootstrap_module.VllmBootstrapOffloader().wrap_modules(iter([unit]))
+
+    assert cached_scale.untyped_storage()._cdata == unit.weight.untyped_storage()._cdata
 
 
 def test_stage_parameter_storage_cache_releases_replaced_backing(bootstrap_module) -> None:
@@ -374,6 +394,66 @@ def test_takeover_adopts_state_retains_manager_and_clears_bootstrap_storage(
     assert manager.runtime_calls == ["sync_prev_onload", "join_after_forward"]
     assert "FlexTensor v2 unit inventory: ['model.layers.0']" in caplog.text
     assert "state takeover installed loader_type=raw_block_transfer" in caplog.text
+
+
+def test_bind_shared_runtime_adopts_live_state_and_clears_bootstrap_refs(
+    bootstrap_module,
+    caplog,
+    monkeypatch,
+) -> None:
+    offloader = bootstrap_module.VllmBootstrapOffloader()
+    offloader.wrap_modules(iter([nn.Module()]))
+    storage_key = (torch.device("cpu"), 1, 4)
+    offloader._staged_parameter_ids.add(1)
+    offloader._staged_storages[storage_key] = torch.ones(1)
+    offloader._staged_storage_sources[storage_key] = object()
+    offloader._pending_deferred_callbacks[0, 0] = set()
+    state = TensorManagerState(
+        loader_type="allocation_block_transfer",
+        tensor_id_to_name_map={},
+        allocation_ordered={},
+        label_to_size_map={},
+        block_sizes={},
+        load_strategy={},
+        release_strategy={},
+        label_to_block_id={},
+        stats=[],
+        transfer_to_compute_map={},
+        view_tensors_ids=[],
+        view_tensors_names=[],
+        gpu_tensors_names=[],
+        shm_block_name_map={},
+    )
+    manager = _RecordingOffloadManager()
+    monkeypatch.setattr(manager, "_export_runtime_state", lambda: state)
+    proxy = nn.Module()
+    proxy.offload_manager = manager
+
+    with caplog.at_level(logging.INFO, logger=bootstrap_module.LOGGER.name):
+        offloader.bind_shared_runtime(proxy)
+    offloader.sync_prev_onload()
+    offloader.join_after_forward()
+
+    assert offloader._runtime_manager is manager
+    assert offloader.runtime_state is state
+    assert offloader._state_built
+    assert offloader._live_units == []
+    assert offloader._staged_parameter_ids == set()
+    assert offloader._staged_storages == {}
+    assert offloader._staged_storage_sources == {}
+    assert offloader._pending_deferred_callbacks == {}
+    assert manager.runtime_calls == ["sync_prev_onload", "join_after_forward"]
+    assert "state takeover installed loader_type=allocation_block_transfer" in caplog.text
+
+
+def test_bind_shared_runtime_requires_proxy_manager(bootstrap_module) -> None:
+    offloader = bootstrap_module.VllmBootstrapOffloader()
+    offloader.wrap_modules(iter([nn.Module()]))
+
+    with pytest.raises(bootstrap_module.VllmFlexTensorV2Error, match=r"shared offload proxy.*OffloadManager"):
+        offloader.bind_shared_runtime(nn.Module())
+
+    assert offloader._runtime_manager is None
 
 
 def test_runtime_hooks_are_noops_before_takeover(bootstrap_module) -> None:

@@ -5,18 +5,29 @@ import os
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
-from typing import Any
+from functools import partial
+from typing import cast
 
 import torch
 
 from flextensor.allocation_block import AllocationBlock, AllocationManager
 from flextensor.compiler_utils import disable as _compiler_disable
 from flextensor.compiler_utils import is_compiling as _is_compiling
+from flextensor.construction_rollback import ConstructionRollback
+from flextensor.core.transfer import (
+    CudaTransferRuntime,
+    TransferTicket,
+    synchronize_transfer_stream,
+)
+from flextensor.core.transfer import (
+    TransferStreamSynchronizationError as _TransferStreamSynchronizationError,
+)
 from flextensor.helpers import format_tensor_id_hint
 from flextensor.host_pinning import HostPinner
 from flextensor.instrumentation import instrumentable
 from flextensor.offload_timing import OffloadTimingCollector
 from flextensor.piecewise_prefetch_policy import PiecewisePrefetchPolicy
+from flextensor.shm.flexible_shm import FlexibleSharedMemory
 from flextensor.strategy_operations import find_transfers_for_preload
 
 from .collectors import IterativeLayerStatistics, LayerStatistics, TensorStatistics
@@ -24,10 +35,23 @@ from .utils import clear_and_delete_tensor, delete_tensor, is_dense_layout
 
 LOGGER = logging.getLogger(__name__)
 
+TransferStreamSynchronizationError = _TransferStreamSynchronizationError
+_CONSTRUCTION_CLEANUP_ATTEMPTS = 2
+
 
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
+
+def _compute_to_block_ids(
+    label_to_block_id: dict[str, int],
+    transfer_to_compute_map: dict[str, str],
+) -> dict[str, list[int]]:
+    result: dict[str, list[int]] = {}
+    for transfer_label, compute_label in transfer_to_compute_map.items():
+        result.setdefault(compute_label, []).append(label_to_block_id[transfer_label])
+    return result
 
 
 def _compute_preload(
@@ -190,17 +214,6 @@ class Loader(ABC):
         return None
 
 
-class TransferStreamSynchronizationError(RuntimeError):
-    """Transfer stream could not be quiesced safely during shutdown."""
-
-
-def _synchronize_transfer_stream(stream: Any) -> None:
-    try:
-        stream.synchronize()
-    except Exception as error:
-        raise TransferStreamSynchronizationError(str(error)) from error
-
-
 class _RawTensorDataBinder:
     """Temporarily point original tensor objects at active materialized storage."""
 
@@ -243,7 +256,7 @@ class _RawTensorDataBinder:
                 (size - 1) * stride for size, stride in zip(tensor.shape, tensor.stride(), strict=True)
             )
             element_size = tensor.element_size()
-            return first_element * element_size, (last_element + 1) * element_size
+            return cast("tuple[int, int]", (first_element * element_size, (last_element + 1) * element_size))
 
         left_bounds = byte_bounds(left)
         right_bounds = byte_bounds(right)
@@ -668,6 +681,10 @@ class TensorStrategyLoader(Loader):
     It supports preloading, asynchronous transfers, and scheduled memory cleanup based on defined policies.
     """
 
+    scheduled_releases: dict[str, torch.cuda.Event]
+    transfer_events: dict[int, torch.cuda.Event]
+    scheduled_transfers: dict[str, torch.cuda.Event]
+
     def __init__(
         self,
         layer_stats: list[LayerStatistics],
@@ -686,10 +703,10 @@ class TensorStrategyLoader(Loader):
         self.strategy_map = strategy_map
         self.release_strategy_map = release_strategy_map
         self.tensors_map = tensors_map
-        self.cpu_to_gpu_map = {}
+        self.cpu_to_gpu_map: dict[int, torch.Tensor] = {}
         # create transfer stream with higher priority
         self.transfer_stream = torch.cuda.Stream(device=self.device_gpu, priority=stream_priority)
-        self.transfer_ongoing = set()
+        self.transfer_ongoing: set[int] = set()
         self.release_tensors = release_tensors
         self.use_events = True
 
@@ -744,11 +761,11 @@ class TensorStrategyLoader(Loader):
         self.scheduled_transfers = {}
         self.del_tensor = delete_tensor_func
 
-        self.tensor_id_to_release_label = {}
-        self.load_to_release_labels_map = {}
+        self.tensor_id_to_release_label: dict[int, str] = {}
+        self.load_to_release_labels_map: dict[str, set[str]] = {}
         self.prepare_load_to_release_labels_map()
 
-    def prepare_load_to_release_labels_map(self):
+    def prepare_load_to_release_labels_map(self) -> None:
         for label, strategy in self.release_strategy_map.items():
             for tensor_info in strategy:
                 self.tensor_id_to_release_label[tensor_info.tensor_id] = label
@@ -787,7 +804,7 @@ class TensorStrategyLoader(Loader):
             tensor_id = tensor_info.tensor_id
             self.transfer_events[tensor_id] = event
 
-    def release_for_label(self, label):
+    def release_for_label(self, label: str) -> None:
         release_strategy = self.release_strategy_map[label]
         for tensor_info in release_strategy:
             if tensor_info.tensor_id in self.cpu_to_gpu_map:
@@ -800,7 +817,7 @@ class TensorStrategyLoader(Loader):
                 self.del_tensor(gpu_tensor)
                 del self.cpu_to_gpu_map[tensor_info.tensor_id]
 
-    def release_memory(self):
+    def release_memory(self) -> None:
         if not self.release_tensors:
             return
         labels_passed = []
@@ -835,17 +852,17 @@ class TensorStrategyLoader(Loader):
         else:
             self.release_memory_with_stream_synchronize(label)
 
-    def release_memory_with_events(self, label):
+    def release_memory_with_events(self, label: str) -> None:
         event = torch.cuda.Event()
         event.record(torch.cuda.current_stream())
         self.release_memory()
         self.scheduled_releases[str(label)] = event
 
-    def release_memory_with_stream_synchronize(self, label):
+    def release_memory_with_stream_synchronize(self, label: str) -> None:
         torch.cuda.current_stream().synchronize()
         self.release_for_label(label)
 
-    def get(self, tensor_id):
+    def get(self, tensor_id: int) -> torch.Tensor | None:
         if tensor_id in self.transfer_events:
             event = self.transfer_events[tensor_id]
             torch.cuda.current_stream().wait_event(event)
@@ -871,7 +888,7 @@ class TensorStrategyLoader(Loader):
 
     def shutdown(self) -> None:
         """Release constructor preloads and interrupted transfer state."""
-        _synchronize_transfer_stream(self.transfer_stream)
+        synchronize_transfer_stream(self.transfer_stream)
         for tensor_id, gpu_tensor in self.cpu_to_gpu_map.items():
             if tensor_id not in self._passthrough_preload_ids:
                 self.del_tensor(gpu_tensor)
@@ -887,12 +904,12 @@ class TensorStrategyLoader(Loader):
 class RawBlockController:
     def __init__(
         self,
-        label_to_size_map,
-        block_sizes,
-        device_gpu,
-        tensors_map,
-        strategy_map,
-        label_to_block_id,
+        label_to_size_map: dict[str, int],
+        block_sizes: dict[int, int],
+        device_gpu: torch.device,
+        tensors_map: Mapping[int, torch.Tensor],
+        strategy_map: dict[str, list[TensorStatistics]],
+        label_to_block_id: dict[str, int],
         *,
         host_pinner: HostPinner,
         release_tensor_memory: bool = True,
@@ -958,21 +975,25 @@ class RawBlockController:
 
         self.prepare_tensor_id_to_view_mapping()
 
-    def prepare_tensor_id_to_view_mapping(self):
-        self.label_to_tensor_views_map = {}
+    def prepare_tensor_id_to_view_mapping(self) -> None:
+        self.label_to_tensor_views_map: dict[str, list[torch.Tensor]] = {}
         for label, meta in self.block_meta_map.items():
             block_id = self.label_to_block_id[label]
             gpu_block = self.block_map_gpu[block_id]
             tensor_views = self.reconstruct_original_shapes(gpu_block, meta)
             self.label_to_tensor_views_map[label] = tensor_views
 
-        self.tensor_id_to_view_map = {}
+        self.tensor_id_to_view_map: dict[int, torch.Tensor] = {}
         for label, views in self.label_to_tensor_views_map.items():
             tensor_ids = self.label_to_cpu_tensor_id_map[label]
             for tensor_id, view in zip(tensor_ids, views, strict=False):
                 self.tensor_id_to_view_map[tensor_id] = view
 
-    def combine_tensors(self, tensors, combined):
+    def combine_tensors(
+        self,
+        tensors: list[torch.Tensor],
+        combined: torch.Tensor,
+    ) -> list[tuple[int, int, torch.Size, torch.dtype, tuple[int, ...]]]:
         metadata = []
         current_idx = 0
         for tensor in tensors:
@@ -994,7 +1015,7 @@ class RawBlockController:
                 # memory layout is preserved in the combined block.
                 offset_bytes = tensor.storage_offset() * element_size
                 byte_tensor = torch.empty(0, dtype=torch.uint8, device=tensor.device)
-                byte_tensor.set_(tensor.untyped_storage(), offset_bytes, (nbytes,))
+                byte_tensor.set_(tensor.untyped_storage(), offset_bytes, (nbytes,))  # type: ignore[call-overload]
             else:
                 # Non-dense with gaps: copy to contiguous layout first.
                 contig = tensor.contiguous()
@@ -1037,10 +1058,10 @@ class RawBlockController:
 
         return reconstructed
 
-    def get_tensor_id_to_view_mapping(self):
+    def get_tensor_id_to_view_mapping(self) -> dict[int, torch.Tensor]:
         return self.tensor_id_to_view_map
 
-    def schedule_transfer(self, label, non_blocking=True):
+    def schedule_transfer(self, label: str, non_blocking: bool = True) -> None:
         cpu_block = self.block_map_cpu[label]
         gpu_block_view = self.gpu_block_view_map[label]
         gpu_block_view.copy_(cpu_block, non_blocking=non_blocking)
@@ -1082,7 +1103,7 @@ class RawBlockController:
 
 @instrumentable
 class AllocationBlockController:
-    def __init__(
+    def __init__(  # noqa: C901 - allocation and rollback form one construction transaction.
         self,
         allocation_ordered: dict[int, list[str]],
         device_gpu: torch.device,
@@ -1093,6 +1114,8 @@ class AllocationBlockController:
         shm_block_name_map: dict[str, str] | None = None,
         block_name_fn: Callable[[int], str] | None = None,
         *,
+        load_from_shm: bool = False,
+        shm_owner: FlexibleSharedMemory | None = None,
         host_pinner: HostPinner,
         release_tensor_memory: bool = True,
     ) -> None:
@@ -1103,61 +1126,173 @@ class AllocationBlockController:
         self.device_gpu_str = self._format_device_str(device_gpu)
         self.block_map_gpu = {}  # block_id to gpu block
         self.label_to_gpu_block = {}
-        self.use_shm = use_shm
-        self.load_model_from_shm = use_shm and shm_block_name_map is not None
-        self.shm_block_name_map = shm_block_name_map or {}
-        self._block_name_fn = block_name_fn or (lambda index: f"ft_{os.getpid()}_{index}")
-        self.host_pinner = host_pinner
-        # When True (inference default), each source weight in ``tensors_map`` is
-        # freed right after being copied into its pinned CPU block, to keep peak
-        # host memory low. A profiling-phase controller built to measure the
-        # *compiled* per-layer timings must pass False: the strategy is recomputed
-        # from those timings and a second (destructive) controller is built from
-        # ``tensors_map`` afterwards, so the source weights must survive this build.
-        self.release_tensor_memory = release_tensor_memory
-
-        for index, (_block_id, layers) in enumerate(allocation_ordered.items()):
-            shm_prefix = None
-            if self.use_shm:
-                if layers[0] not in self.shm_block_name_map:
-                    shm_prefix = self._block_name_fn(index)
-                else:
-                    shm_prefix = self.shm_block_name_map[layers[0]]
-            allocation_manager = AllocationManager(
-                shm_block_name_prefix=shm_prefix,
-                load_from_shm=self.load_model_from_shm,
-                pinned_memory=True,
-                host_pinner=self.host_pinner,
-                release_tensor_memory=self.release_tensor_memory,
-            )
-            for label in layers:
-                if self.use_shm and label not in self.shm_block_name_map:
-                    self.shm_block_name_map[label] = shm_prefix
-                strategy = strategy_map[label]
-                if len(strategy) == 0:
-                    continue
-                block = allocation_manager.block()
-                self.block_map_cpu[label] = block
-                # _add_tensors calls block.allocate(), which releases each tensor's
-                # storage immediately after copying because release_tensor_memory=True.
-                tensor_ids_list = self._add_tensors(label, strategy, tensors_map, block)
-                self.label_to_cpu_tensor_id_map[label] = tensor_ids_list
-
-            gpu_block = allocation_manager.create_max_block(device=self.device_gpu_str)
-            for label in layers:
-                self.label_to_gpu_block[label] = gpu_block
-
         self.label_to_tensor_views_map = {}
         self.gpu_block_view_map = {}
-        for label, cpu_block in self.block_map_cpu.items():
-            gpu_block = self.label_to_gpu_block[label]
-            gpu_tensor_views, gpu_block_view = cpu_block.project_views(gpu_block)
-            self.label_to_tensor_views_map[label] = gpu_tensor_views
-            block_id = label_to_block_id[label]
-            self.block_map_gpu[block_id] = gpu_block_view  # TODO: REMOVE!
-            self.gpu_block_view_map[label] = gpu_block_view
+        self.tensor_id_to_view_map: dict[int, torch.Tensor] = {}
+        self.use_shm = use_shm
+        attach_existing = use_shm and load_from_shm
+        # Treat the caller's profile map as input. Publishing names into it
+        # incrementally would leave a failed construction looking complete to
+        # a later retry.
+        self.shm_block_name_map = dict(shm_block_name_map or {}) if attach_existing else {}
+        self._block_name_fn = block_name_fn or (lambda index: f"ft_{os.getpid()}_{index}")
+        self.host_pinner = host_pinner
+        # When True (inference default), source weights are released as they are
+        # copied into pinned CPU blocks. Compiled re-plan profiling disables this
+        # so a second, destructive controller can be built from the same tensors.
+        self.release_tensor_memory = release_tensor_memory
+        # Every successfully returned block enters this sole ownership ledger.
+        self._owned_blocks: list[AllocationBlock] = []
+        self._construction_rollback = ConstructionRollback()
 
-        self.prepare_tensor_id_to_view_mapping()
+        try:
+            if release_tensor_memory and not attach_existing:
+                self._validate_source_storage(allocation_ordered, strategy_map, tensors_map)
+            for index, (_block_id, layers) in enumerate(allocation_ordered.items()):
+                shm_prefix = self._get_shm_prefix(index, layers)
+                allocation_manager = AllocationManager(
+                    shm_block_name_prefix=shm_prefix,
+                    load_from_shm=attach_existing,
+                    shm_owner=shm_owner,
+                    pinned_memory=True,
+                    host_pinner=self.host_pinner,
+                    release_tensor_memory=self.release_tensor_memory,
+                )
+                for label in layers:
+                    strategy = strategy_map[label]
+                    if len(strategy) == 0:
+                        continue
+                    if shm_prefix is not None and label not in self.shm_block_name_map:
+                        self.shm_block_name_map[label] = shm_prefix
+                    block = allocation_manager.block()
+                    # Record ownership before allocation or map publication:
+                    # allocate() is where CPU SHM is created/attached and may
+                    # fail after acquiring the handle.
+                    self._owned_blocks.append(block)
+                    if release_tensor_memory and not attach_existing:
+                        self._construction_rollback.record(block, strategy, tensors_map)
+                    # _add_tensors calls block.allocate(), which may release each
+                    # source tensor according to release_tensor_memory.
+                    tensor_ids_list = self._add_tensors(label, strategy, tensors_map, block)
+                    self.block_map_cpu[label] = block
+                    self.label_to_cpu_tensor_id_map[label] = tensor_ids_list
+
+                gpu_block = allocation_manager.create_max_block(device=self.device_gpu_str)
+                self._owned_blocks.append(gpu_block)
+                for label in layers:
+                    self.label_to_gpu_block[label] = gpu_block
+
+            for label, cpu_block in self.block_map_cpu.items():
+                gpu_block = self.label_to_gpu_block[label]
+                gpu_tensor_views, gpu_block_view = cpu_block.project_views(gpu_block)
+                self.label_to_tensor_views_map[label] = gpu_tensor_views
+                block_id = label_to_block_id[label]
+                self.block_map_gpu[block_id] = gpu_block_view  # TODO: REMOVE!
+                self.gpu_block_view_map[label] = gpu_block_view
+
+            self.prepare_tensor_id_to_view_mapping()
+        except BaseException as primary_error:
+            protected_blocks = self._construction_rollback.restore(attempts=_CONSTRUCTION_CLEANUP_ATTEMPTS)
+            protected_block_ids = {id(block) for block in protected_blocks}
+            releasable_blocks = [block for block in self._owned_blocks if id(block) not in protected_block_ids]
+            failed_releases = self._release_blocks(
+                releasable_blocks,
+                attempts=_CONSTRUCTION_CLEANUP_ATTEMPTS,
+            )
+            self._owned_blocks = [*protected_blocks, *failed_releases]
+            self._clear_allocation_maps()
+            self.shm_block_name_map.clear()
+            if self._owned_blocks:
+                self._attach_cleanup_controller(primary_error)
+            raise
+
+    def _get_shm_prefix(self, index: int, layers: list[str]) -> str | None:
+        if not self.use_shm:
+            return None
+        for label in layers:
+            if label in self.shm_block_name_map:
+                return self.shm_block_name_map[label]
+        return self._block_name_fn(index)
+
+    @staticmethod
+    def _validate_source_storage(
+        allocation_ordered: dict[int, list[str]],
+        strategy_map: dict[str, list[TensorStatistics]],
+        tensors_map: Mapping[int, torch.Tensor],
+    ) -> None:
+        """Reject unsupported storage groups before any source tensor is released."""
+        managed_ids = {
+            id(tensors_map[info.tensor_id])
+            for layers in allocation_ordered.values()
+            for label in layers
+            for info in strategy_map.get(label, ())
+        }
+        sources = {
+            id(tensor): tensor
+            for tensor in tensors_map.values()
+            if not tensor.is_meta and tensor.layout == torch.strided
+        }
+        shared_ids = _RawTensorDataBinder._find_shared_storage_ids(sources)  # noqa: SLF001
+        for tensor_id in managed_ids:
+            if tensor_id in shared_ids:
+                # Disjoint views are normal after release() transfers packed
+                # CPU storage back to the model. Only overlap is unsupported.
+                raise ValueError(
+                    "Block loaders cannot preserve distinct tensor views sharing storage with overlapping byte regions "
+                    f"(tensor ids {sorted(shared_ids[tensor_id])}); use the strategy loader"
+                )
+
+    @staticmethod
+    def _release_blocks(
+        blocks: list[AllocationBlock],
+        *,
+        attempts: int,
+    ) -> list[AllocationBlock]:
+        """Release owned blocks with bounded retries for staged teardown."""
+        pending = list(reversed(blocks))
+        for _attempt in range(attempts):
+            if not pending:
+                break
+            failed: list[AllocationBlock] = []
+            for block in pending:
+                try:
+                    block.release()
+                except BaseException:
+                    # Construction cleanup must never replace the primary
+                    # failure. Failed staged handles remain reachable below.
+                    LOGGER.warning("Failed to release allocation block during cleanup", exc_info=True)
+                    failed.append(block)
+            pending = failed
+        pending.reverse()
+        return pending
+
+    def _attach_cleanup_controller(
+        self,
+        primary_error: BaseException,
+        cleanup_error: BaseException | None = None,
+    ) -> None:
+        """Keep retryable handles reachable without replacing the primary error."""
+        try:
+            primary_error.__dict__["_flextensor_cleanup_controller"] = self
+            if cleanup_error is not None:
+                primary_error.__dict__["_flextensor_cleanup_error"] = cleanup_error
+            add_note = getattr(primary_error, "add_note", None)
+            if callable(add_note):
+                add_note(
+                    "FlexTensor construction cleanup is incomplete; call "
+                    "exception._flextensor_cleanup_controller.shutdown() to retry it."
+                )
+        except BaseException:
+            LOGGER.exception("Could not attach retryable cleanup handles to the primary error")
+
+    def _clear_allocation_maps(self) -> None:
+        self.block_map_cpu.clear()
+        self.label_to_cpu_tensor_id_map.clear()
+        self.block_map_gpu.clear()
+        self.label_to_gpu_block.clear()
+        self.label_to_tensor_views_map.clear()
+        self.gpu_block_view_map.clear()
+        self.tensor_id_to_view_map.clear()
 
     def _add_tensors(
         self,
@@ -1215,46 +1350,52 @@ class AllocationBlockController:
             device_str += ":" + str(device_gpu.index)
         return device_str
 
-    def prepare_tensor_id_to_view_mapping(self):
+    def prepare_tensor_id_to_view_mapping(self) -> None:
         self.tensor_id_to_view_map = {}
         for label, views in self.label_to_tensor_views_map.items():
             tensor_ids = self.label_to_cpu_tensor_id_map[label]
             for tensor_id, view in zip(tensor_ids, views, strict=False):
                 self.tensor_id_to_view_map[tensor_id] = view
 
-    def get_tensor_id_to_view_mapping(self):
+    def get_tensor_id_to_view_mapping(self) -> dict[int, torch.Tensor]:
         return self.tensor_id_to_view_map
 
-    def schedule_transfer(self, label, non_blocking=True):
+    def schedule_transfer(self, label: str, non_blocking: bool = True) -> None:
         cpu_block = self.block_map_cpu[label]
         gpu_block_view = self.gpu_block_view_map[label]
         cpu_block.copy_to(gpu_block_view, non_blocking=non_blocking)
 
+    def commit_construction(self) -> None:
+        """Discard rollback metadata after a transfer loader assumes ownership."""
+        self._construction_rollback.commit()
+
+    def abort_construction(self, primary_error: BaseException | None = None) -> None:
+        """Restore source tensors and release resources after handoff failure."""
+        try:
+            self.shutdown()
+        except BaseException as cleanup_error:
+            if primary_error is not None:
+                self._attach_cleanup_controller(primary_error, cleanup_error)
+            raise
+
     def shutdown(self) -> None:
-        for block in self.block_map_cpu.values():
-            block.release()
-        self.block_map_cpu.clear()
-        self.block_map_gpu.clear()
-        self.label_to_gpu_block.clear()
-        self.gpu_block_view_map.clear()
-        self.label_to_tensor_views_map.clear()
-        self.label_to_cpu_tensor_id_map.clear()
-        self.tensor_id_to_view_map.clear()
+        protected_blocks = self._construction_rollback.restore(attempts=_CONSTRUCTION_CLEANUP_ATTEMPTS)
+        protected_block_ids = {id(block) for block in protected_blocks}
+        failed_releases = self._release_blocks(
+            [block for block in self._owned_blocks if id(block) not in protected_block_ids],
+            attempts=_CONSTRUCTION_CLEANUP_ATTEMPTS,
+        )
+        self._owned_blocks = [*protected_blocks, *failed_releases]
+        self._clear_allocation_maps()
+        if self._owned_blocks:
+            raise RuntimeError(
+                f"AllocationBlockController cleanup remains incomplete for {len(self._owned_blocks)} block(s)"
+            )
 
     def release_gpu_blocks(self) -> None:
-        """Drop every reference to this controller's GPU block allocations.
-
-        ``shutdown`` only frees the pinned CPU blocks; the GPU block storage is
-        kept alive by ``label_to_gpu_block`` (the full blocks) and the view maps
-        (``block_map_gpu``/``gpu_block_view_map``/``label_to_tensor_views_map``/
-        ``tensor_id_to_view_map``) that alias into them. Clearing all of these
-        returns the segments to the caching allocator's free pool so the next
-        allocation (e.g. a re-plan's rebuilt loader) can reuse them, keeping peak
-        GPU memory at ~1x instead of holding old+new blocks simultaneously.
-
-        Caller contract: only safe once no live tensor (e.g. ``param.data``)
-        aliases these GPU views.
-        """
+        """Drop references to GPU blocks once no live tensor aliases them."""
+        gpu_block_ids = {id(block) for block in self.label_to_gpu_block.values()}
+        self._owned_blocks = [block for block in self._owned_blocks if id(block) not in gpu_block_ids]
         self.label_to_gpu_block = {}
         self.block_map_gpu = {}
         self.gpu_block_view_map = {}
@@ -1337,7 +1478,6 @@ class PreallocatedBatchTransferTensorLoader(PreallocatedLoader):
         device_gpu: torch.device,
         label_to_block_id: dict[str, int],
         transfer_to_compute_map: dict[str, str],
-        stream_priority: int,
         allocation_controller: AllocationBlockController | RawBlockController,
         offload_timing_collector: "OffloadTimingCollector | None" = None,
         piecewise_prefetch_policy: "PiecewisePrefetchPolicy | None" = None,
@@ -1348,28 +1488,18 @@ class PreallocatedBatchTransferTensorLoader(PreallocatedLoader):
             piecewise_prefetch_policy=piecewise_prefetch_policy,
         )
         self.device_gpu = device_gpu
-        self.cpu_to_gpu_map = {}
+        self.cpu_to_gpu_map: dict[int, torch.Tensor] = {}
 
         self.label_to_block_id = label_to_block_id
         self.transfer_to_compute_map = transfer_to_compute_map
 
-        self.transfer_stream = torch.cuda.Stream(device=self.device_gpu, priority=stream_priority)
-        self.scheduled_transfers = {}
+        self._transfer_runtime = CudaTransferRuntime(device_gpu)
+        self.transfer_stream = self._transfer_runtime.transfer_stream
+        self.scheduled_transfers: dict[str, TransferTicket] = {}
+        self._compute_to_block_ids = _compute_to_block_ids(label_to_block_id, transfer_to_compute_map)
 
-        self.compute_events = {}  # block id -> event, add in exit
-        self.block_events = {}  # block id -> event , add in enter
-
-        self.compute_events_map = {}
-        self.last_block_id_to_label_map = {}
-
-        # Track iteration boundary for cross-iteration synchronization
-        self.last_iteration_event: torch.cuda.Event | None = None
         self.first_layer_label: str | None = None
         self.last_layer_label: str | None = None
-
-        # True while transfer_stream has unjoined H2D; cleared by
-        # ``join_after_forward`` / last-layer ``exit`` join.
-        self._has_pending_transfer_work: bool = False
 
         if layer_stats:
             self.first_layer_label = layer_stats[0].label
@@ -1385,95 +1515,65 @@ class PreallocatedBatchTransferTensorLoader(PreallocatedLoader):
 
     @_compiler_disable
     def preload(self) -> None:
-        with torch.cuda.stream(self.transfer_stream):
-            for label, _compute_label in self.preload_transfers.items():
-                self.allocation_controller.schedule_transfer(label)
-        torch.cuda.current_stream().wait_stream(self.transfer_stream)
-
-        # Track which block each preloaded label occupies so enter() can wait
-        # for compute to finish before overwriting the block with new data.
-        for label, _compute_label in self.preload_transfers.items():
+        if not self.preload_transfers:
+            return
+        self._transfer_runtime.begin()
+        for label in self.preload_transfers:
             block_id = self.label_to_block_id[label]
-            self.last_block_id_to_label_map[block_id] = label
+            self._transfer_runtime.submit(
+                block_id,
+                partial(self.allocation_controller.schedule_transfer, label),
+                trace_label=f"schedule={label} consume={self.transfer_to_compute_map[label]}",
+            )
+        self._transfer_runtime.join()
 
     def prepare(self) -> None:
         self.preload()
 
     @_compiler_disable
-    def enter(self, label):
+    def enter(self, label: str) -> None:
         tc = self.offload_timing_collector
         pp = self.piecewise_prefetch_policy
 
         if label == self.first_layer_label:
-            # Abort: join then clear all maps. Preload-only: clear occupancy maps,
-            # keep scheduled_transfers for the first wait.
-            recovering = bool(self.compute_events_map) or self._has_pending_transfer_work
+            recovering = self._transfer_runtime.is_active
             if recovering:
-                if self._has_pending_transfer_work or self.scheduled_transfers:
-                    join_event = self.transfer_stream.record_event()
-                    torch.cuda.current_stream().wait_event(join_event)
-                    self._has_pending_transfer_work = False
+                pending_count = len(self.scheduled_transfers)
+                self._transfer_runtime.join()
                 LOGGER.debug(
-                    "PreallocatedBatchTransferTensorLoader: abort recovery — joined "
-                    "transfer stream and clearing %d scheduled / %d compute / %d "
-                    "block-map entries",
-                    len(self.scheduled_transfers),
-                    len(self.compute_events_map),
-                    len(self.last_block_id_to_label_map),
+                    "%s: abort recovery — joined transfer stream and clearing %d scheduled entries",
+                    type(self).__name__,
+                    pending_count,
                 )
                 self.scheduled_transfers.clear()
-                self.compute_events_map.clear()
-                self.last_block_id_to_label_map.clear()
-            elif self.compute_events_map or self.last_block_id_to_label_map:
-                LOGGER.debug(
-                    "PreallocatedBatchTransferTensorLoader: clearing %d stale event-map "
-                    "entries from aborted previous iteration",
-                    len(self.compute_events_map),
-                )
-                self.compute_events_map.clear()
-                self.last_block_id_to_label_map.clear()
 
-            self._has_pending_transfer_work = False
             tc.on_pass_start()
             pp.reset()
 
-        # Fork transfer_stream into this capture/eager session once. FULL /
-        # eager keep a single fork for the whole forward; PIECEWISE re-forks
-        # only after ``join_after_forward`` clears ``_has_pending_transfer_work``.
-        if not self._has_pending_transfer_work:
-            fork_event = torch.cuda.current_stream().record_event()
-            self.transfer_stream.wait_event(fork_event)
-            self._has_pending_transfer_work = True
+        if not self._transfer_runtime.is_active:
+            self._transfer_runtime.begin()
 
         if label not in self.label_to_block_id:
             tc.record_compute_start(label)
             return
 
         block_id = self.label_to_block_id[label]
-        if block_id in self.last_block_id_to_label_map:
-            last_label = self.last_block_id_to_label_map[block_id]
-            compute_label = self.transfer_to_compute_map[last_label]
-            if compute_label in self.compute_events_map:
-                event_compute = self.compute_events_map[compute_label]
-                self.transfer_stream.wait_event(event_compute)
 
-        self.last_block_id_to_label_map[block_id] = label
-
-        tc.record_transfer_start(label, self.transfer_stream)
-
-        with torch.cuda.stream(self.transfer_stream):
+        def transfer() -> None:
+            tc.record_transfer_start(label, self.transfer_stream)
             self.allocation_controller.schedule_transfer(label)
 
-        event = self.transfer_stream.record_event()
-        self.scheduled_transfers[label] = event
-        # Non-reordered waits by schedule label in exit (same-layer).
+        self.scheduled_transfers[label] = self._transfer_runtime.submit(
+            block_id,
+            transfer,
+            trace_label=f"schedule={label} consume={self.transfer_to_compute_map[label]}",
+        )
         pp.on_schedule(schedule_label=label, compute_label=label)
-
         tc.record_transfer_end(label, self.transfer_stream)
         tc.record_compute_start(label)
 
     @_compiler_disable
-    def exit(self, label):
+    def exit(self, label: str) -> None:
         tc = self.offload_timing_collector
         pp = self.piecewise_prefetch_policy
 
@@ -1481,17 +1581,19 @@ class PreallocatedBatchTransferTensorLoader(PreallocatedLoader):
         # pure forward work, not forward + stall.
         tc.record_compute_end(label)
 
-        if label in self.scheduled_transfers:
+        ticket = self.scheduled_transfers.get(label)
+        if ticket is not None:
             tc.record_wait_start(label)
-
-            event = self.scheduled_transfers[label]
-            torch.cuda.current_stream().wait_event(event)
+            self._transfer_runtime.wait_ready(ticket)
             pp.on_wait(label)
-
             tc.record_wait_end(label)
 
-        event_compute = torch.cuda.current_stream().record_event()
-        self.compute_events_map[label] = event_compute
+        slots = self._compute_to_block_ids.get(label)
+        if self._transfer_runtime.is_active and slots:
+            for slot in slots:
+                self._transfer_runtime.finish_use(slot)
+        else:
+            torch.cuda.current_stream().record_event()
 
         # Cross-iteration sync: record event on transfer stream after last layer.
         # Also serves as the final join to bring the transfer stream back to the
@@ -1499,10 +1601,8 @@ class PreallocatedBatchTransferTensorLoader(PreallocatedLoader):
         if label == self.last_layer_label:
             from flextensor.piecewise_prefetch_policy import PiecewisePrefetchPolicyError
 
-            if self._has_pending_transfer_work:
-                self.last_iteration_event = self.transfer_stream.record_event()
-                torch.cuda.current_stream().wait_event(self.last_iteration_event)
-                self._has_pending_transfer_work = False
+            if self._transfer_runtime.is_active:
+                self._transfer_runtime.join()
 
             # Clear maps even if strict policy raises (same contract as
             # join_after_forward) so capture-session handles never leak.
@@ -1514,8 +1614,6 @@ class PreallocatedBatchTransferTensorLoader(PreallocatedLoader):
 
             # After join: drop completion maps (incl. scheduled_transfers).
             self.scheduled_transfers.clear()
-            self.compute_events_map.clear()
-            self.last_block_id_to_label_map.clear()
 
             if policy_error is not None:
                 raise policy_error
@@ -1546,24 +1644,17 @@ class PreallocatedBatchTransferTensorLoader(PreallocatedLoader):
         except PiecewisePrefetchPolicyError as exc:
             policy_error = exc
 
-        if self._has_pending_transfer_work:
-            join_event = self.transfer_stream.record_event()
-            torch.cuda.current_stream().wait_event(join_event)
-            self._has_pending_transfer_work = False
-
-        # Always clear: stale capture-session handles must not span boundaries.
+        self._transfer_runtime.join()
         self.scheduled_transfers.clear()
-        self.compute_events_map.clear()
-        self.last_block_id_to_label_map.clear()
 
         if policy_error is not None:
             raise policy_error
 
-    def release_memory(self):
+    def release_memory(self) -> None:
         pass
 
     def shutdown(self) -> None:
-        _synchronize_transfer_stream(self.transfer_stream)
+        self._transfer_runtime.close()
         super().shutdown()
 
 
@@ -1575,7 +1666,6 @@ class PreallocatedBatchTransferTensorLoaderReordered(PreallocatedLoader):
         device_gpu: torch.device,
         label_to_block_id: dict[str, int],
         transfer_to_compute_map: dict[str, str],
-        stream_priority: int,
         allocation_controller: AllocationBlockController | RawBlockController,
         offload_timing_collector: "OffloadTimingCollector | None" = None,
         piecewise_prefetch_policy: "PiecewisePrefetchPolicy | None" = None,
@@ -1586,26 +1676,20 @@ class PreallocatedBatchTransferTensorLoaderReordered(PreallocatedLoader):
             piecewise_prefetch_policy=piecewise_prefetch_policy,
         )
         self.device_gpu = device_gpu
-        self.cpu_to_gpu_map = {}
+        self.cpu_to_gpu_map: dict[int, torch.Tensor] = {}
 
         self.label_to_block_id = label_to_block_id
         self.transfer_to_compute_map = transfer_to_compute_map
 
-        self.transfer_stream = torch.cuda.Stream(device=self.device_gpu, priority=stream_priority)
-        self.scheduled_transfers = {}
-
-        self.compute_events = {}  # block id -> event, add in exit
-        self.block_events = {}  # block id -> event , add in enter
-
-        self.compute_events_map = {}
-        self.last_block_id_to_label_map = {}
+        self._transfer_runtime = CudaTransferRuntime(device_gpu)
+        self.transfer_stream = self._transfer_runtime.transfer_stream
+        self.scheduled_transfers: dict[str, list[TransferTicket]] = {}
+        self._compute_to_block_ids = _compute_to_block_ids(label_to_block_id, transfer_to_compute_map)
+        self._preloaded_compute_labels: set[str] = set()
 
         # Track iteration boundary for CUDA graph capture
         self.first_layer_label: str | None = None
         self.last_layer_label: str | None = None
-
-        # See PreallocatedBatchTransferTensorLoader for PIECEWISE rationale.
-        self._has_pending_transfer_work: bool = False
 
         if layer_stats:
             self.first_layer_label = layer_stats[0].label
@@ -1621,72 +1705,55 @@ class PreallocatedBatchTransferTensorLoaderReordered(PreallocatedLoader):
 
     @_compiler_disable
     def preload(self) -> None:
-        with torch.cuda.stream(self.transfer_stream):
-            for label, _compute_label in self.preload_transfers.items():
-                self.allocation_controller.schedule_transfer(label)
-        torch.cuda.current_stream().wait_stream(self.transfer_stream)
-
+        if not self.preload_transfers:
+            return
+        self._transfer_runtime.begin()
         for label, compute_label in self.preload_transfers.items():
             block_id = self.label_to_block_id[label]
-            self.last_block_id_to_label_map[block_id] = label
-            event = self.transfer_stream.record_event()
-            self.scheduled_transfers[compute_label] = event
+            self._transfer_runtime.submit(
+                block_id,
+                partial(self.allocation_controller.schedule_transfer, label),
+                trace_label=f"schedule={label} consume={compute_label}",
+            )
+            self._preloaded_compute_labels.add(compute_label)
+        self._transfer_runtime.join()
 
     def prepare(self) -> None:
         self.preload()
 
     @_compiler_disable
-    def enter(self, label):
+    def enter(self, label: str) -> None:
         tc = self.offload_timing_collector
         pp = self.piecewise_prefetch_policy
 
         if label == self.first_layer_label:
-            # Abort: join then clear all maps. Preload-only: clear occupancy maps,
-            # keep scheduled_transfers for the first wait.
-            recovering = bool(self.compute_events_map) or self._has_pending_transfer_work
+            recovering = self._transfer_runtime.is_active
             if recovering:
-                if self._has_pending_transfer_work or self.scheduled_transfers:
-                    join_event = self.transfer_stream.record_event()
-                    torch.cuda.current_stream().wait_event(join_event)
-                    self._has_pending_transfer_work = False
+                pending_count = len(self.scheduled_transfers)
+                self._transfer_runtime.join()
                 LOGGER.debug(
-                    "PreallocatedBatchTransferTensorLoaderReordered: abort recovery — "
-                    "joined transfer stream and clearing %d scheduled / %d compute / "
-                    "%d block-map entries",
-                    len(self.scheduled_transfers),
-                    len(self.compute_events_map),
-                    len(self.last_block_id_to_label_map),
+                    "%s: abort recovery — joined transfer stream and clearing %d scheduled entries",
+                    type(self).__name__,
+                    pending_count,
                 )
                 self.scheduled_transfers.clear()
-                self.compute_events_map.clear()
-                self.last_block_id_to_label_map.clear()
-            elif self.compute_events_map or self.last_block_id_to_label_map:
-                LOGGER.debug(
-                    "PreallocatedBatchTransferTensorLoaderReordered: clearing %d stale "
-                    "event-map entries from aborted previous iteration",
-                    len(self.compute_events_map),
-                )
-                self.compute_events_map.clear()
-                self.last_block_id_to_label_map.clear()
 
-            self._has_pending_transfer_work = False
             tc.on_pass_start()
             pp.reset()
 
-        # Fork once per forward / PIECEWISE piece; re-fork after join_after_forward.
-        if not self._has_pending_transfer_work:
-            fork_event = torch.cuda.current_stream().record_event()
-            self.transfer_stream.wait_event(fork_event)
-            self._has_pending_transfer_work = True
+        if not self._transfer_runtime.is_active:
+            self._transfer_runtime.begin()
 
-        # Wait for the transfer that provides this layer's data before compute reads it.
-        if label in self.scheduled_transfers:
-            tc.record_wait_start(label)
-
-            event = self.scheduled_transfers[label]
-            torch.cuda.current_stream().wait_event(event)
+        if label in self._preloaded_compute_labels:
             pp.on_wait(label)
 
+        # Wait for the transfer that provides this layer's data before compute reads it.
+        tickets = self.scheduled_transfers.pop(label, None)
+        if tickets:
+            tc.record_wait_start(label)
+            for ticket in tickets:
+                self._transfer_runtime.wait_ready(ticket)
+            pp.on_wait(label)
             tc.record_wait_end(label)
 
         if label not in self.label_to_block_id:
@@ -1697,34 +1764,28 @@ class PreallocatedBatchTransferTensorLoaderReordered(PreallocatedLoader):
 
         tc.record_compute_start(label)
 
-    def _schedule_block_transfer(self, label) -> None:
+    def _schedule_block_transfer(self, label: str) -> None:
         """Issue the rolling-block H2D transfer for ``label`` on the transfer stream."""
         tc = self.offload_timing_collector
         pp = self.piecewise_prefetch_policy
         block_id = self.label_to_block_id[label]
-        if block_id in self.last_block_id_to_label_map:
-            last_label = self.last_block_id_to_label_map[block_id]
-            compute_label = self.transfer_to_compute_map[last_label]
-            if compute_label in self.compute_events_map:
-                event_compute = self.compute_events_map[compute_label]
-                self.transfer_stream.wait_event(event_compute)
-
-        self.last_block_id_to_label_map[block_id] = label
-
-        tc.record_transfer_start(label, self.transfer_stream)
-
         compute_label = self.transfer_to_compute_map[label]
-        with torch.cuda.stream(self.transfer_stream):
+
+        def transfer() -> None:
+            tc.record_transfer_start(label, self.transfer_stream)
             self.allocation_controller.schedule_transfer(label)
-            event = self.transfer_stream.record_event()
 
+        ticket = self._transfer_runtime.submit(
+            block_id,
+            transfer,
+            trace_label=f"schedule={label} consume={compute_label}",
+        )
         tc.record_transfer_end(label, self.transfer_stream)
-
-        self.scheduled_transfers[compute_label] = event
+        self.scheduled_transfers.setdefault(compute_label, []).append(ticket)
         pp.on_schedule(schedule_label=label, compute_label=compute_label)
 
     @_compiler_disable
-    def exit(self, label):
+    def exit(self, label: str) -> None:
         tc = self.offload_timing_collector
         pp = self.piecewise_prefetch_policy
 
@@ -1732,18 +1793,20 @@ class PreallocatedBatchTransferTensorLoaderReordered(PreallocatedLoader):
         # pure forward work, not forward + stall.
         tc.record_compute_end(label)
 
-        event_compute = torch.cuda.current_stream().record_event()
-        self.compute_events_map[label] = event_compute
+        slots = self._compute_to_block_ids.get(label)
+        if self._transfer_runtime.is_active and slots:
+            for slot in slots:
+                self._transfer_runtime.finish_use(slot)
+        else:
+            torch.cuda.current_stream().record_event()
 
         # Join: bring transfer stream back to compute stream after last layer.
         # Required for CUDA graph capture completeness.
         if label == self.last_layer_label:
             from flextensor.piecewise_prefetch_policy import PiecewisePrefetchPolicyError
 
-            if self._has_pending_transfer_work:
-                last_event = self.transfer_stream.record_event()
-                torch.cuda.current_stream().wait_event(last_event)
-                self._has_pending_transfer_work = False
+            if self._transfer_runtime.is_active:
+                self._transfer_runtime.join()
 
             # Clear maps even if strict policy raises (same contract as
             # join_after_forward) so capture-session handles never leak.
@@ -1755,8 +1818,6 @@ class PreallocatedBatchTransferTensorLoaderReordered(PreallocatedLoader):
 
             # After join: drop completion maps (incl. scheduled_transfers).
             self.scheduled_transfers.clear()
-            self.compute_events_map.clear()
-            self.last_block_id_to_label_map.clear()
 
             if policy_error is not None:
                 raise policy_error
@@ -1783,21 +1844,15 @@ class PreallocatedBatchTransferTensorLoaderReordered(PreallocatedLoader):
         except PiecewisePrefetchPolicyError as exc:
             policy_error = exc
 
-        if self._has_pending_transfer_work:
-            join_event = self.transfer_stream.record_event()
-            torch.cuda.current_stream().wait_event(join_event)
-            self._has_pending_transfer_work = False
-
+        self._transfer_runtime.join()
         self.scheduled_transfers.clear()
-        self.compute_events_map.clear()
-        self.last_block_id_to_label_map.clear()
 
         if policy_error is not None:
             raise policy_error
 
-    def release_memory(self):
+    def release_memory(self) -> None:
         pass
 
     def shutdown(self) -> None:
-        _synchronize_transfer_stream(self.transfer_stream)
+        self._transfer_runtime.close()
         super().shutdown()

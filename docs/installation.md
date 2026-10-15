@@ -6,9 +6,15 @@
 
 ## Requirements
 
-- Python 3.10 or higher
+- Python 3.11 or higher
 - PyTorch 2.5 or higher (with CUDA support)
 - CUDA-capable GPU
+
+Python 3.14 requires PyTorch 2.10 or higher.
+
+Shared memory (SHM) is not supported on Windows. The `posix-ipc` dependency is
+skipped on Windows; keep `shm_enabled=False` (the default) and do not use
+`SharedOffloadSession` there.
 
 ## Install from Package
 

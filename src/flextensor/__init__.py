@@ -24,6 +24,7 @@ except ImportError:
 # New simplified public API
 # Internal implementation (kept for backward compatibility and advanced usage)
 from flextensor.benchmark_tensor_mode import BenchmarkReplace, PreloadToDevice, TensorBenchmarkMode
+from flextensor.compile import StrategyReplanStatus
 from flextensor.config import OffloadConfig, load_config, load_config_from_env, load_config_from_file
 from flextensor.host_pinning import PinnedMemoryMode
 from flextensor.lazy_model_init import load_model_from_profile
@@ -40,10 +41,12 @@ from flextensor.offload_manager import (
     offload_block,
     offload_from_profile,
     offload_from_state,
+    offload_units,
     pause_profiling,
     release,
     request_strategy_replan,
     reset_offload_timing,
+    resident_units,
     resume_profiling,
     save_profile,
     set_config,
@@ -56,6 +59,8 @@ from flextensor.offload_timing import (
     OffloadTimingSnapshot,
     format_offload_timing_table,
 )
+from flextensor.shared_offload import SharedOffloadSession
+from flextensor.shm.coordinator import ShmCoordinatorError, ShmCreatorDiedError, ShmCreatorFailedError
 from flextensor.strategy import (
     AdaptiveKnapsackStrategy,
     AdaptiveStrategy,
@@ -81,6 +86,11 @@ __all__ = [  # noqa: RUF022
     "OffloadConfig",
     "OffloadManager",
     "PinnedMemoryMode",
+    "SharedOffloadSession",
+    "ShmCoordinatorError",
+    "ShmCreatorDiedError",
+    "ShmCreatorFailedError",
+    "StrategyReplanStatus",
     "clear_profiling_durations",
     "collect_offload_timing",
     "format_offload_timing_table",
@@ -94,7 +104,9 @@ __all__ = [  # noqa: RUF022
     "offload_block",
     "offload_from_profile",
     "offload_from_state",
+    "offload_units",
     "request_strategy_replan",
+    "resident_units",
     "reset_offload_timing",
     "set_config",
     "save_profile",

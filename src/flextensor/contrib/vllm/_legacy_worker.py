@@ -19,6 +19,7 @@ from contextlib import contextmanager
 from typing import Any, cast
 
 import psutil
+from typing_extensions import deprecated
 from vllm.utils.mem_constants import GiB_bytes
 from vllm.v1.worker.gpu_worker import Worker
 
@@ -289,16 +290,32 @@ def vllm_model_context(model_runner: Any) -> Any:
             model_runner.model = model_container[0]
 
 
+@deprecated(
+    "The legacy/v1 FlexTensor vLLM worker is deprecated. "
+    "Use worker v2 instead by unsetting FT_VLLM_USE_V2_WORKER or setting it to '1'. "
+    "Will be removed in v0.6.0."
+)
 class FlexTensorOffloadWorker(Worker):
     """vLLM Worker with FlexTensor offloading support.
 
     Applies tensor offloading after model loading when FT_ENABLED=1.
+
+    .. deprecated:: v0.5.0
+        Use worker v2 by unsetting ``FT_VLLM_USE_V2_WORKER`` or setting it to
+        ``1``. The legacy/v1 worker will be removed in v0.6.0.
     """
+
+    _ft_compile_gated_modules: list[Any] | None
 
     def load_model(self) -> None:
         """Load model with optional FlexTensor offloading."""
         # Create offload config using the device set by init_device()
         offload_config = load_config(gpu_device=self.device.index)
+        if offload_config.shm_enabled:
+            raise RuntimeError(
+                "The legacy vLLM worker does not support OffloadConfig.shm_enabled=True; "
+                "use worker v2 (FT_VLLM_USE_V2_WORKER=1)."
+            )
         config_updates = _vllm_config_updates(offload_config)
         self._offload_config = offload_config.model_copy(update=config_updates)
         if self._offload_config.enabled:
@@ -453,6 +470,7 @@ class FlexTensorOffloadWorker(Worker):
         root = getattr(om, "model", None)
         if root is None:
             return
+        gated: list[Any] | None
         if not enabled:
             existing = getattr(self, "_ft_compile_gated_modules", None)
             if existing is not None:

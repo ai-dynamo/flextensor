@@ -5,11 +5,15 @@
 
 import collections
 import dataclasses
+import sys
+import types
+from types import SimpleNamespace
 
 import pytest
 import torch
 import torch.nn as nn
 
+import flextensor.tensor_processors as tensor_processors
 from flextensor.tensor_manager import ModelDict
 from flextensor.tensor_processors import (
     DisableRequiresGradTensorProcessor,
@@ -36,6 +40,33 @@ def test_disable_requires_grad_skips_non_leaf_views() -> None:
 
     assert model.base.requires_grad is False
     assert model.view.requires_grad is True
+
+
+@pytest.mark.parametrize("has_hidden_module", [False, True])
+def test_tensor_processor_preserves_stage_missing_layer(has_hidden_module: bool) -> None:
+    class StageMissingLayer(nn.Module):
+        """The storage and lookup behavior of vLLM's StageMissingLayer."""
+
+        def __init__(self, module: nn.Module | None) -> None:
+            super().__init__()
+            self.__dict__["module"] = module
+
+        def __getattr__(self, name: str):
+            return getattr(self.__dict__["module"], name)
+
+    tower = nn.Module() if has_hidden_module else None
+    missing_layer = StageMissingLayer(tower)
+    model = nn.Module()
+    model.visual = missing_layer
+
+    assert getattr(missing_layer, "quant_method", None) is None
+
+    TensorProcessor().apply(model)
+
+    # vLLM kernel warmup probes each module after offloader takeover.
+    assert getattr(missing_layer, "quant_method", None) is None
+    assert missing_layer.__dict__["module"] is tower
+    assert "module" not in missing_layer._modules
 
 
 class TestTensorMappingProcessor:
@@ -275,6 +306,28 @@ class TestReachableTensorMapProcessor:
         assert id(dict_view) in ids
         assert id(set_view) in ids
 
+    def test_returns_tensors_nested_in_ordered_dict(self) -> None:
+        tensor = torch.zeros(1)
+        model = nn.Module()
+        model.metadata = collections.OrderedDict((("tensor", tensor),))
+
+        assert id(tensor) in compute_reachable_tensor_ids(model)
+
+    def test_skips_scalar_mapping_leaves_before_object_detection(self, monkeypatch) -> None:
+        tensor = torch.zeros(1)
+        model = nn.Module()
+        model.metadata = {"values": {index: index for index in range(10)}, "tensor": tensor}
+        original_can_handle = tensor_processors._ObjectAttributesTypeHandler.can_handle
+
+        def reject_scalar(self, value):
+            if type(value) is int:
+                pytest.fail("scalar mapping leaf reached object detection")
+            return original_can_handle(self, value)
+
+        monkeypatch.setattr(tensor_processors._ObjectAttributesTypeHandler, "can_handle", reject_scalar)
+
+        assert id(tensor) in compute_reachable_tensor_ids(model)
+
     def test_returns_tensors_nested_in_list_and_tuple_attributes(self) -> None:
         class _M(nn.Module):
             def __init__(self) -> None:
@@ -308,6 +361,12 @@ class TestReachableTensorMapProcessor:
         ids = compute_reachable_tensor_ids(model)
 
         assert ids == {id(t1), id(t2)}
+
+    def test_model_dict_returns_metadata_values(self) -> None:
+        model = ModelDict(model={"metadata": "value"})
+        model.tensor_manager = SimpleNamespace(is_traced_by_id=lambda _tensor_id: False)
+
+        assert model["metadata"] == "value"
 
     def test_module_with_nonstandard_missing_items_getattr(self) -> None:
         """Diffusers modules can raise ``KeyError`` for missing config attrs."""
@@ -421,6 +480,76 @@ class TestReachableTensorMapProcessor:
 
         assert m.w is original_w
         assert proc.get_results()[id(original_w)] is original_w
+
+    def test_map_processor_revisits_plain_objects_on_each_apply(self) -> None:
+        @dataclasses.dataclass
+        class Holder:
+            tensor: torch.Tensor
+
+        m = nn.Module()
+        m.holder = Holder(torch.zeros(1))
+        proc = ReachableTensorMapProcessor()
+        proc.apply(m)
+
+        replacement = torch.ones(1)
+        m.holder.tensor = replacement
+        proc.apply(m)
+
+        assert proc.get_results()[id(replacement)] is replacement
+
+    def test_plain_object_detection_avoids_static_reflection(self, monkeypatch) -> None:
+        @dataclasses.dataclass
+        class Holder:
+            tensor: torch.Tensor
+
+        monkeypatch.setattr(
+            tensor_processors.inspect,
+            "getattr_static",
+            lambda *_args, **_kwargs: pytest.fail("slow static reflection used"),
+        )
+
+        assert tensor_processors._ObjectAttributesTypeHandler().can_handle(Holder(torch.zeros(1)))
+
+    def test_skips_python_module_objects(self) -> None:
+        """A module reference on an engine object must not lead the walk into ``sys.modules``.
+
+        SGLang stores ``pp_group`` (a ``GroupCoordinator``) on the model, and its
+        ``device_module`` is the ``torch.cuda`` module.
+        """
+        namespace = types.ModuleType("fake_device_module")
+        namespace.tensor = torch.zeros(1)
+        namespace.sys = sys
+        m = nn.Module()
+        m.w = nn.Parameter(torch.zeros(2))
+        m.pp_group = types.SimpleNamespace(device_module=namespace)
+
+        ids = compute_reachable_tensor_ids(m)
+
+        assert id(m.w) in ids
+        assert id(namespace.tensor) not in ids
+
+    def test_self_referential_dict_attribute(self) -> None:
+        """A dict that contains itself (like a module's ``globals()``) does not recurse forever."""
+        tensor = torch.zeros(3)
+        cyclic: dict[str, object] = {"tensor": tensor}
+        cyclic["self"] = cyclic
+        m = nn.Module()
+        m.cyclic = cyclic
+
+        ids = compute_reachable_tensor_ids(m)
+
+        assert id(tensor) in ids
+
+    def test_self_referential_list_attribute(self) -> None:
+        tensor = torch.zeros(3)
+        cyclic: list[object] = [tensor]
+        cyclic.append(cyclic)
+        m = nn.Module()
+        m.cyclic = cyclic
+
+        ids = compute_reachable_tensor_ids(m)
+
+        assert id(tensor) in ids
 
 
 class TestMoveBuffersToGPUTensorProcessor:

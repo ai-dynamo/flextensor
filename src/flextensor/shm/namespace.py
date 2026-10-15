@@ -14,10 +14,16 @@ from flextensor.config import OffloadConfig  # noqa: TC001
 from flextensor.gpu_budget import resolve_gpu_mem_bytes
 from flextensor.offload_manager import DEFAULT_MANAGER_NAME
 
-SHM_PROTOCOL_VERSION: int = 3
+SHM_PROTOCOL_VERSION: int = 4
 """Bumped when SHM data layout changes in incompatible ways.
 
 History:
+    v4: coordinated standalone serving adds stable namespaces, per-handle participant
+        identities, exact managed-tensor dtypes, a resident-tensor store, and an
+        INITIALIZING/READY/FAILED coordinator state machine. Profile and tensor
+        blocks share the coordinator's lifetime and heartbeat; a shared name
+        registry permits cleanup even after the creator dies. A live-participant
+        check gates adoption of existing generations.
     v3: coordination header stores the creator PID for exact liveness checks.
     v2: namespace hash keys changed (module_patterns → include_patterns, added exclude_patterns).
     v1: initial release.

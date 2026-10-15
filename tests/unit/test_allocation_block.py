@@ -208,9 +208,6 @@ class TestMakeBaseBlockPinning:
                 self.block.buf = self._buf
                 self.shm_creator = True
 
-            def notify_ready(self):
-                pass
-
         monkeypatch.setattr(allocation_block_module, "FlexibleSharedMemory", _SpyShm)
 
         # Vary the pinner (proxy for "would have been built from

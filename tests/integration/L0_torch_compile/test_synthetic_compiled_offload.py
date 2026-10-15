@@ -18,7 +18,7 @@ import uuid
 import pytest
 import torch
 
-from flextensor import OffloadConfig, get_offload_manager, offload_from_profile
+from flextensor import OffloadConfig, StrategyReplanStatus, get_offload_manager, offload_from_profile
 from flextensor.compile.lifecycle import COMPILED_WARMUP_FORWARDS, PROFILE_COMPILE_WARMUP_FORWARDS
 from flextensor.compile.warmup_tail import CompiledOffloadTailState
 from flextensor.custom_ops import get_active_loader
@@ -455,8 +455,12 @@ class TestSyntheticCompiledOffload:
             _drive_to_inference(proxy, x, om)
             assert om._current_phase == OffloadPhase.INFERENCE  # noqa: SLF001
             assert om._compiled.tail_state == CompiledOffloadTailState.DONE  # noqa: SLF001
+            # compile_fn is FlexTensor-driven and view-profile needs no replan.
+            assert not om.external_compile_active
+            assert not om.strategy_replan_status.can_request
             assert om.request_strategy_replan() == 0
             assert om._compiled.tail_state == CompiledOffloadTailState.DONE  # noqa: SLF001
+            assert om.strategy_replan_status == StrategyReplanStatus(state="idle", can_request=False, applied=None)
 
             torch._dynamo.reset()
             with torch.no_grad():
@@ -597,8 +601,15 @@ class TestExternalCompiledOffloadReplan:
             loader_before = tm.tensor_layer_loader
             assert loader_before is not None
 
+            assert om.external_compile_active
+            preflight = om.strategy_replan_status
+            assert preflight.state == "idle"
+            assert preflight.can_request
+            assert preflight.applied is None
+
             replan_iters = om.request_strategy_replan()
             assert replan_iters == COMPILED_WARMUP_FORWARDS + PROFILING_ITERS
+            assert om.strategy_replan_status.state == "in_progress"
 
             torch._dynamo.reset()
             with torch.no_grad():
@@ -607,6 +618,11 @@ class TestExternalCompiledOffloadReplan:
             assert om._compiled.tail_state == CompiledOffloadTailState.DONE  # noqa: SLF001
             assert tm.tensor_layer_loader is not loader_before, "replan must rebuild the inference loader"
             assert not tm._replan_source_data, "successful rebuild clears the source-weight snapshot"  # noqa: SLF001
+            applied_status = om.strategy_replan_status
+            assert applied_status.state == "done"
+            assert applied_status.applied is True
+            # The rebuild consumed the snapshot, so a second replan is refused.
+            assert not applied_status.can_request
             assert get_active_loader(om.compiled_offload_manager_id) is tm.tensor_layer_loader
 
             with torch.no_grad():

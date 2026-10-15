@@ -76,7 +76,12 @@ These wrap the [`OffloadManager`](offload-manager.md) singleton for common use c
 ## Offload timing and strategy replan
 
 Measure H2D / compute / wait during inference (`OffloadConfig.offload_timing`)
-and rebuild the offload strategy after compile or CUDA-graph capture. See
+and rebuild the offload strategy after compile or CUDA-graph capture. After
+INFERENCE, [`offload_units()`](#flextensor.offload_manager.offload_units) /
+[`resident_units()`](#flextensor.offload_manager.resident_units) list the
+modules to compile per unit. `OffloadManager.external_compile_active` and
+`OffloadManager.strategy_replan_status` report replan availability and outcome
+without touching the model. See
 [Measure transfer overlap](../how-to/configure-for-common-scenarios.md#measure-transfer-overlap-during-inference)
 and [torch.compile](../how-to/torch-compile.md).
 
@@ -93,6 +98,18 @@ and [torch.compile](../how-to/torch-compile.md).
       show_root_full_path: false
 
 ::: flextensor.offload_manager.request_strategy_replan
+    options:
+      show_root_full_path: false
+
+::: flextensor.compile.replan_status.StrategyReplanStatus
+    options:
+      show_root_full_path: false
+
+::: flextensor.offload_manager.offload_units
+    options:
+      show_root_full_path: false
+
+::: flextensor.offload_manager.resident_units
     options:
       show_root_full_path: false
 

@@ -16,6 +16,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserve instrumentation records with cyclic list or tuple arguments by
   serializing back-references as circular-reference markers.
 
+## [0.5.0] — 2026-10-12
+
+### Added
+
+- Add shared-memory weight sharing across workers in the LTX 2.3 Outpaint
+  NGINX example, with automatic namespace setup and cleanup. Direct serving
+  supports SHM via `--shm-namespace` and defaults to private weights.
+- Add `SharedOffloadSession` for coordinated loading from profiles. The elected
+  creator loads checkpoints; followers build model skeletons and attach shared
+  weights. Existing schema-v3 disk profiles remain supported.
+  `cleanup_namespace()` reclaims abandoned shared resources after workers stop.
+- Add `TensorManager.export_state()` to publish live tensor metadata and
+  `SharedTensorStore` to share resident parameters and registered buffers with
+  followers while preserving aliases.
+- Add `OffloadManager.offload_units()` / `resident_units()` (and matching
+  package-level helpers) to list outermost offloaded and GPU-resident modules
+  as `(name, module)` pairs for external per-unit compile.
+- Add `OffloadManager.external_compile_active` and
+  `OffloadManager.strategy_replan_status` to check whether a
+  [strategy replan](docs/api/glossary.md#strategy-replan) is available and
+  whether it succeeded, without affecting the run. See
+  [torch.compile](docs/how-to/torch-compile.md#preflight-and-verify-the-replan).
+- Add profile-backed POSIX-SHM bootstrap to vLLM worker v2 for single-node
+  local `mp` data parallelism (`DP >= 2`, vLLM 0.17.0 or later). One elected
+  worker loads checkpoints while followers attach to shared host weights; see the
+  [vLLM example](examples/vllm/README.md#share-weights-across-local-data-parallel-workers).
+- Add `preserve_model=False` to `release()` for disposable models that should
+  release loader-backed weights without rebuilding private model storage.
+  The default continues to preserve the released model.
+
+### Changed
+
+- **Breaking:** `OffloadConfig(shm_enabled=True)` requires an explicit, non-empty
+  `shm_namespace`. Use `SharedOffloadSession` to manage creator/follower election,
+  per-manager namespaces, publication, and cleanup.
+- **Breaking:** Upgrade the SHM protocol from v3 to v4. All participants sharing
+  a namespace must use the same version and restart together.
+- Remove the CuPy requirement for SHM by registering pinned mappings through
+  PyTorch's CUDA runtime.
+
+### Deprecated
+
+- Legacy/v1 FlexTensor vLLM worker — use worker v2 by unsetting
+  `FT_VLLM_USE_V2_WORKER` or setting it to `1`. Will be removed in v0.6.0.
+
+### Fixed
+
+- Preserve hidden model modules during offloading; avoid missing-attribute crashes.
+- Support installation and use on Windows without SHM by skipping `posix-ipc`
+  and POSIX-only imports.
+- Prevent SHM followers from hanging after creator failures or losing shared
+  blocks while still attached. Support bounded initialization waits and retrying
+  failed cleanup.
+- Allocation-block construction failures now restore released source tensors
+  and clean up partially created CPU, GPU, and SHM blocks without masking the
+  original error, including failures while constructing the transfer loader.
+  Rollback preserves storage offsets and reconnects surviving backing storage;
+  overlapping source views are rejected before source release. Disjoint views
+  in retained CPU blocks can be offloaded again and keep shared storage on rollback.
+- Materialize mapped meta tensors while preserving parameter subclasses and
+  aliases, with a parameter factory for custom constructors and track the
+  replacement tensors for model teardown.
+- Fix diffusion output differences caused by compiled offload on affected
+  PyTorch builds. Warn when the compatibility fix cannot recognize the build.
+- Prevent duplicate hook calls and broken hook removal across offload model
+  swaps. Keep late-registered backward hooks active.
+- Prevent an invalid `request_strategy_replan()` from discarding the progress or
+  the recorded failure of an earlier replan. Requests that cannot run now warn
+  and return `0` instead of restarting measurement.
+- Support offloading models that cache tensor views in nested objects.
+- Support offloading models with broadcast or expanded tensor weights.
+- Fix `RecursionError` when scanning a model for reachable tensors whose
+  attributes reference a Python module (such as `torch.cuda`) or a dict or list
+  that contains itself. Python modules are no longer scanned.
+
 ## [0.4.0] — 2026-08-17
 
 ### Added
@@ -344,7 +419,8 @@ memory snapshot collection during worker lifecycle.
 **Known limitations** — inference only (no training or backward pass); no data parallelism;
 no MoE support; not thread-safe (one thread per manager instance).
 
-[Unreleased]: https://github.com/ai-dynamo/flextensor/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/ai-dynamo/flextensor/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/ai-dynamo/flextensor/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ai-dynamo/flextensor/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ai-dynamo/flextensor/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/ai-dynamo/flextensor/compare/v0.2.0...v0.2.1

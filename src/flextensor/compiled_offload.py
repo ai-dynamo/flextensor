@@ -209,8 +209,11 @@ def build_compiled_offload_forward(
     stable offload-unit name.
     """
     from flextensor import custom_ops as _ft_custom_ops
+    from flextensor.compiler_utils import patch_inductor_mutation_reads
 
-    def compiled_offload_forward(self_module, *args, **kwargs):
+    patch_inductor_mutation_reads()
+
+    def compiled_offload_forward(self_module: Any, *args: Any, **kwargs: Any) -> Any:
         dep_input = _resolve_compiled_offload_dep_input(args, kwargs)
         manager_id = getattr(self_module, "_ft_manager_id", 0)
         if dep_input is None and _ft_custom_ops.has_active_loader(manager_id):

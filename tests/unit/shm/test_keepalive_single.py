@@ -19,7 +19,7 @@ def test_prepare_slot_rejects_exhausted_timestamp_view():
 
     with pytest.raises(
         RuntimeError,
-        match=r"timestamp slots exhausted: process_id=222, slot=1, timestamp_capacity=1",
+        match=r"timestamp slots exhausted: participant_id=222, slot=1, timestamp_capacity=1",
     ):
         keep_alive_dict.prepare_slot(222)
 
@@ -88,7 +88,7 @@ class TestKeepAliveSingle:
         try:
             with pytest.raises(
                 RuntimeError,
-                match=r"mapping storage exhausted: process_id=12345, slot=0, keep_alive_dict_size=8",
+                match=r"mapping storage exhausted: participant_id=12345, slot=0, keep_alive_dict_size=8",
             ):
                 keep_alive_dict.prepare_slot(self.process_id)
 
@@ -110,7 +110,7 @@ class TestKeepAliveSingle:
         try:
             with pytest.raises(
                 RuntimeError,
-                match=r"mapping storage exhausted: process_id=12345, slot=0, keep_alive_dict_size=8",
+                match=r"mapping storage exhausted: participant_id=12345, slot=0, keep_alive_dict_size=8",
             ):
                 KeepAlive(
                     name=self.test_name,
@@ -124,32 +124,60 @@ class TestKeepAliveSingle:
             if instances:
                 instances[0].unlink()
 
-    def test_lock_construction_failure_closes_keep_alive_dict(self, monkeypatch):
-        """A lock construction error must close the dictionary opened earlier."""
-        instances = []
-        original_init = KeepAliveDict.__init__
+    @pytest.mark.parametrize("lock_stage", ["__init__", "acquire"])
+    @pytest.mark.parametrize("unlink_on_init_failure", [False, True])
+    def test_lock_failure_does_not_open_keep_alive_dict(self, lock_stage, unlink_on_init_failure):
+        """No shared memory may be opened until the initialization lock is held."""
+        with (
+            patch.object(KeepAliveDict, "__init__") as dictionary,
+            patch.object(ProcessFileLock, lock_stage, side_effect=OSError("lock failed")),
+            patch.object(ProcessFileLock, "unlink") as unlink,
+            pytest.raises(OSError, match="lock failed"),
+        ):
+            KeepAlive(
+                name=self.test_name,
+                process_id=self.process_id,
+                is_creator=True,
+                unlink_on_init_failure=unlink_on_init_failure,
+            )
 
-        def capture_instance(self, *args, **kwargs):
-            original_init(self, *args, **kwargs)
-            instances.append(self)
+        dictionary.assert_not_called()
+        unlink.assert_not_called()
 
-        monkeypatch.setattr(KeepAliveDict, "__init__", capture_instance)
+    @pytest.mark.parametrize("lock_class", [SemaphoreLock, ProcessFileLock])
+    def test_dict_initialization_failure_closes_mapping_and_allows_retry(self, lock_class):
+        """A partial dictionary must close its mapping and release the initialization lock."""
+        from multiprocessing.shared_memory import SharedMemory
 
+        from shared_memory_dict import SharedMemoryDict
+
+        mappings = []
+        original_dict_init = SharedMemoryDict.__init__
+        original_shm_init = SharedMemory.__init__
+
+        def open_dictionary(dictionary, *args, **kwargs):
+            original_dict_init(dictionary, *args, **kwargs)
+            mappings.append(dictionary.shm)
+
+        def fail_timestamp_open(shm, *args, **kwargs):
+            if kwargs.get("name") == f"{self.test_name}_m":
+                raise OSError("timestamp open failed")
+            original_shm_init(shm, *args, **kwargs)
+
+        with (
+            patch.object(SharedMemoryDict, "__init__", open_dictionary),
+            patch.object(SharedMemory, "__init__", fail_timestamp_open),
+            pytest.raises(OSError, match="timestamp open failed"),
+        ):
+            KeepAlive(name=self.test_name, process_id=self.process_id, is_creator=True, lock_class=lock_class)
+
+        assert len(mappings) == 1
+        assert mappings[0]._mmap is None
+        retry = KeepAlive(name=self.test_name, process_id=self.process_id, is_creator=True, lock_class=lock_class)
         try:
-            with (
-                patch.object(ProcessFileLock, "__init__", side_effect=OSError("lock construction failed")),
-                pytest.raises(OSError, match="lock construction failed"),
-            ):
-                KeepAlive(
-                    name=self.test_name,
-                    process_id=self.process_id,
-                    is_creator=True,
-                )
-
-            assert instances[0]._closed is True  # noqa: SLF001
+            assert retry.is_process_alive(self.process_id)
         finally:
-            if instances:
-                instances[0].unlink()
+            retry.close(any_process_alive=False)
 
     @pytest.mark.parametrize("keep_alive_seconds", [0, -1, float("nan"), float("inf")])
     def test_invalid_keep_alive_seconds_is_rejected(self, keep_alive_seconds):

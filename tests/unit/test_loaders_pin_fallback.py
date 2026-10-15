@@ -20,7 +20,7 @@ import torch
 from flextensor import host_pinning
 from flextensor.allocation_block import AllocationBlock
 from flextensor.collectors import TensorStatistics
-from flextensor.host_pinning import HostPinner, HostPinRegistry
+from flextensor.host_pinning import HostPinner, HostPinRegistry, NoOpHostPinner
 from flextensor.loaders import (
     AllocationBlockController,
     PreallocatedBatchTransferTensorLoader,
@@ -175,7 +175,7 @@ def test_allocation_block_controller_shutdown_does_not_unregister_pins(monkeypat
 
     # Bypass the (heavy) AllocationBlockController constructor: build it
     # empty, then attach pre-pinned AllocationBlocks directly. The shutdown
-    # contract only depends on what's in `block_map_cpu`.
+    # contract depends on the controller's owned-block ledger.
     controller = AllocationBlockController(
         allocation_ordered={},
         device_gpu=torch.device("cpu"),
@@ -192,6 +192,7 @@ def test_allocation_block_controller_shutdown_does_not_unregister_pins(monkeypat
             block_size=nbytes,
         )
         controller.block_map_cpu[label] = block
+        controller._owned_blocks.append(block)  # noqa: SLF001 - attach fixture-owned blocks
 
     assert len(cudart.register_calls) == 3, (
         "test precondition: each block construction must have registered its base buffer"
@@ -218,7 +219,17 @@ def test_allocation_block_controller_shutdown_does_not_unregister_pins(monkeypat
 
 @pytest.mark.parametrize("controller_type", [RawBlockController, AllocationBlockController])
 def test_block_controller_shutdown_drops_owned_storage_maps(controller_type):
-    controller = controller_type.__new__(controller_type)
+    if controller_type is RawBlockController:
+        controller = controller_type.__new__(controller_type)
+    else:
+        controller = controller_type(
+            allocation_ordered={},
+            device_gpu=torch.device("cpu"),
+            tensors_map={},
+            strategy_map={},
+            label_to_block_id={},
+            host_pinner=NoOpHostPinner(),
+        )
     controller.block_map_cpu = {}
     controller.block_map_gpu = {0: torch.ones(1)}
     controller.gpu_block_view_map = {"layer": torch.ones(1)}
@@ -276,7 +287,11 @@ def test_strategy_loader_shutdown_drops_preloads_and_transfer_state():
 def test_preallocated_loader_shutdown_synchronizes_before_releasing_blocks():
     events = []
     loader = PreallocatedBatchTransferTensorLoader.__new__(PreallocatedBatchTransferTensorLoader)
-    loader.transfer_stream = type("Stream", (), {"synchronize": lambda _self: events.append("synchronize")})()
+    loader._transfer_runtime = type(
+        "Runtime",
+        (),
+        {"close": lambda _self: events.append("synchronize")},
+    )()
     loader.allocation_controller = type("Controller", (), {"shutdown": lambda _self: events.append("shutdown")})()
 
     loader.shutdown()

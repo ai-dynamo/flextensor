@@ -1562,11 +1562,24 @@ class TestShmConfigFields:
         assert config.shm_namespace is None
         assert config.shm_wait_timeout == 0.0
 
-    def test_shm_enabled_construction_no_warning(self):
-        """Constructing with shm_enabled (the new field) emits no deprecation warning."""
+    def test_valid_shm_config_construction_no_warning(self):
+        """A complete SHM configuration emits no deprecation warning."""
         with warnings.catch_warnings():
             warnings.simplefilter("error", DeprecationWarning)
-            OffloadConfig(shm_enabled=True)  # must not raise
+            config = OffloadConfig(shm_enabled=True, shm_namespace="my_model")
+
+        assert config.shm_wait_timeout == 0.0
+
+    @pytest.mark.parametrize("namespace", [None, "", "   \t"])
+    def test_shm_enabled_requires_non_empty_namespace(self, namespace):
+        """SHM configuration fails fast without a stable visible namespace."""
+        with pytest.raises(ValidationError, match=r"shm_namespace.*shm_enabled=True"):
+            OffloadConfig(shm_enabled=True, shm_namespace=namespace)
+
+    def test_model_copy_revalidates_shm_namespace(self):
+        """Enabling SHM through model_copy cannot bypass the namespace invariant."""
+        with pytest.raises(ValidationError, match=r"shm_namespace.*shm_enabled=True"):
+            OffloadConfig().model_copy(update={"shm_enabled": True})
 
     def test_shm_env_vars_loaded(self, monkeypatch):
         """FT_SHM_* env vars populate config fields."""

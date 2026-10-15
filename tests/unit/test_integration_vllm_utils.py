@@ -385,6 +385,36 @@ def test_collect_vllm_backend_evidence_records_multiword_unquoted_selection() ->
     )
 
 
+@pytest.mark.parametrize(
+    ("selection_log", "expected_backend"),
+    [
+        ("Using TRITON backend for Unquantized MoE", "TRITON"),
+        ("Using FlashInfer CUTLASS backend for Unquantized MoE", "FlashInfer CUTLASS"),
+    ],
+)
+def test_collect_vllm_backend_evidence_accepts_nvidia_unquantized_word_order(
+    selection_log: str,
+    expected_backend: str,
+) -> None:
+    evidence = collect_vllm_backend_evidence([selection_log], model_name="Qwen/Qwen3.6-35B-A3B")
+
+    assert evidence["selected_moe_backend"] == expected_backend
+    assert evidence["selected_moe_backend_family"] == "Unquantized"
+
+
+def test_nvidia_selection_clears_stale_potential_backends() -> None:
+    evidence = collect_vllm_backend_evidence(
+        [
+            "Using FlashInfer CUTLASS Unquantized MoE backend out of potential backends: ['FlashInfer CUTLASS'].",
+            "Using TRITON backend for Unquantized MoE",
+        ],
+        model_name="Qwen/Qwen3.6-35B-A3B",
+    )
+
+    assert evidence["selected_moe_backend"] == "TRITON"
+    assert evidence["potential_moe_backends"] == []
+
+
 def test_collect_vllm_backend_evidence_records_quantized_selection_without_potential_backends() -> None:
     log_lines = [
         "[vLLM] (EngineCore pid=881) INFO 05-21 17:42:14 "

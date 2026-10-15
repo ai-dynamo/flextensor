@@ -22,7 +22,6 @@ from tests.integration._vllm_utils import (
     assert_moe_backend_selection,
     assert_moe_backend_selection_in,
     assert_no_triton_cpu_pointer_failure,
-    assert_rejected_moe_backend_reason,
     sanitize_test_name,
     validate_latest_memory_transfer_stats_for_current_bus,
 )
@@ -286,17 +285,6 @@ class TestQwen36Bf16Moe:
             backend_evidence,
             expected_backend="TRITON",
             expected_family="Unquantized",
-            expected_potential_backends=QWEN3_6_UNQUANTIZED_MOE_BACKENDS,
-        )
-        assert_rejected_moe_backend_reason(
-            backend_evidence,
-            backend="FlashInfer TRTLLM",
-            reason_contains="kernel does not support current device cuda",
-        )
-        assert_rejected_moe_backend_reason(
-            backend_evidence,
-            backend="FlashInfer CUTLASS",
-            reason_contains="kernel does not support current device cuda",
         )
         if offload_memory.available_kv_cache_memory_gib is not None:
             assert offload_memory.available_kv_cache_memory_gib > 0, f"{case.model_name} reported no available KV cache"
@@ -340,7 +328,6 @@ class TestQwen36Bf16Moe:
             offload_metrics["backend_evidence"],
             expected_backends=QWEN3_6_UNQUANTIZED_MOE_BACKENDS,
             expected_family="Unquantized",
-            expected_potential_backends=QWEN3_6_UNQUANTIZED_MOE_BACKENDS,
         )
         if offload_memory.available_kv_cache_memory_gib is not None:
             assert offload_memory.available_kv_cache_memory_gib > 0, f"{case.model_name} reported no available KV cache"

@@ -239,14 +239,18 @@ def _block_restore_case() -> tuple[
 
     runtime_view = expected.clone()
     set_tensor_data(parameter, runtime_view)
-    controller = AllocationBlockController.__new__(AllocationBlockController)
+    controller = AllocationBlockController(
+        allocation_ordered={},
+        device_gpu=torch.device("cpu"),
+        tensors_map={},
+        strategy_map={},
+        label_to_block_id={},
+        host_pinner=manager.host_pinner,
+    )
     controller.block_map_cpu = {"layer": block}
-    controller.block_map_gpu = {}
-    controller.label_to_gpu_block = {}
-    controller.gpu_block_view_map = {}
-    controller.label_to_tensor_views_map = {}
     controller.label_to_cpu_tensor_id_map = {"layer": [id(parameter)]}
     controller.tensor_id_to_view_map = {id(parameter): runtime_view}
+    controller._owned_blocks = [block]  # noqa: SLF001 - construct focused controller fixture
     manager.tensors_map = {id(parameter): parameter}
     manager.tensor_layer_loader = MagicMock(
         allocation_controller=controller,
@@ -265,6 +269,42 @@ def test_shutdown_transfers_regular_cpu_block_storage_back_to_model() -> None:
     assert controller.block_map_cpu == {}
 
 
+def test_reoffload_after_shutdown_accepts_disjoint_weights_in_retained_cpu_block() -> None:
+    model = torch.nn.Linear(3, 2).requires_grad_(False)
+    inputs = torch.arange(3.0)
+    expected = model(inputs).clone()
+    for _cycle in range(2):
+        manager = _make_tensor_manager()
+        manager.tensors_map = {id(tensor): tensor for tensor in model.parameters()}
+        strategy = [
+            TensorStatistics(
+                tensor_id=id(tensor), name=name, size_bytes=tensor.numel() * tensor.element_size(), load_time_ms=0.0
+            )
+            for name, tensor in model.named_parameters()
+        ]
+        controller = AllocationBlockController(
+            allocation_ordered={0: ["layer"]},
+            device_gpu=torch.device("cpu"),
+            tensors_map=manager.tensors_map,
+            strategy_map={"layer": strategy},
+            label_to_block_id={"layer": 0},
+            host_pinner=manager.host_pinner,
+        )
+        cpu_storage_id = controller.block_map_cpu["layer"].block.untyped_storage()._cdata
+        for tensor_id, view in controller.tensor_id_to_view_map.items():
+            set_tensor_data(manager.tensors_map[tensor_id], view)
+        controller.commit_construction()
+        controller.schedule_transfer("layer", non_blocking=False)
+        torch.testing.assert_close(model(inputs), expected)
+        manager.tensor_layer_loader = MagicMock(allocation_controller=controller, shutdown=controller.shutdown)
+
+        manager.shutdown()
+
+        torch.testing.assert_close(model(inputs), expected)
+        assert model.weight.untyped_storage()._cdata == cpu_storage_id
+        assert model.bias.untyped_storage()._cdata == cpu_storage_id
+
+
 def test_shutdown_copies_shm_block_storage_before_unmapping() -> None:
     manager, parameter, expected, block, source_storage, controller = _block_restore_case()
     runtime_storage = parameter.untyped_storage()._cdata  # noqa: SLF001
@@ -276,6 +316,24 @@ def test_shutdown_copies_shm_block_storage_before_unmapping() -> None:
 
     torch.testing.assert_close(parameter, expected)
     assert parameter.untyped_storage()._cdata not in {source_storage, runtime_storage}  # noqa: SLF001
+    assert controller.block_map_cpu == {}
+
+
+def test_shutdown_can_discard_shm_backed_model_without_copying_weights() -> None:
+    manager, parameter, _expected, block, _source_storage, controller = _block_restore_case()
+    runtime_storage = parameter.untyped_storage()._cdata  # noqa: SLF001
+    shm_block = MagicMock()
+    block.shm_block = shm_block
+    block.shm_block_name = "test"
+    block.lock_class = MagicMock(return_value=MagicMock())
+
+    with patch.object(manager, "_restore_block_loader_tensor_data") as restore_tensor_data:
+        manager.shutdown(preserve_model=False)
+
+    restore_tensor_data.assert_not_called()
+    assert parameter.numel() == 0
+    assert parameter.untyped_storage()._cdata != runtime_storage  # noqa: SLF001
+    shm_block.close.assert_called_once_with()
     assert controller.block_map_cpu == {}
 
 

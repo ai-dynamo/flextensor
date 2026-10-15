@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from flextensor.core.transfer import CudaTransferRuntime
 from flextensor.loaders import (
     PreallocatedBatchTransferTensorLoader,
     PreallocatedBatchTransferTensorLoaderReordered,
@@ -112,10 +113,10 @@ def _bare_loader(cls: type) -> PreallocatedBatchTransferTensorLoader:
     """Minimal loader instance for join/exit map-clear tests (no CUDA init)."""
     loader = object.__new__(cls)
     loader.piecewise_prefetch_policy = PiecewisePrefetchPolicy(enabled=True, strict=True)
-    loader._has_pending_transfer_work = False
     loader.scheduled_transfers = {"keep": object()}
-    loader.compute_events_map = {"keep": object()}
-    loader.last_block_id_to_label_map = {"keep": "L0"}
+    loader._transfer_runtime = MagicMock(spec=CudaTransferRuntime)
+    loader._transfer_runtime.is_active = False
+    loader._compute_to_block_ids = {}
     loader.transfer_stream = MagicMock()
     loader.last_layer_label = "L_last"
     loader.offload_timing_collector = MagicMock()
@@ -134,8 +135,6 @@ class TestLoaderStrictJoinClearsMaps:
             loader.join_after_forward()
 
         assert loader.scheduled_transfers == {}
-        assert loader.compute_events_map == {}
-        assert loader.last_block_id_to_label_map == {}
 
     def test_last_layer_exit_clears_maps_when_strict_raises(self) -> None:
         loader = _bare_loader(PreallocatedBatchTransferTensorLoader)
@@ -148,8 +147,6 @@ class TestLoaderStrictJoinClearsMaps:
             loader.exit("L_last")
 
         assert loader.scheduled_transfers == {}
-        assert loader.compute_events_map == {}
-        assert loader.last_block_id_to_label_map == {}
 
     def test_reordered_last_layer_exit_allows_next_iter_prefetch(self) -> None:
         """Strict reordered last-layer must not raise on next-iter outstanding."""
@@ -164,5 +161,3 @@ class TestLoaderStrictJoinClearsMaps:
             loader.exit("L_last")  # must not raise
 
         assert loader.scheduled_transfers == {}
-        assert loader.compute_events_map == {}
-        assert loader.last_block_id_to_label_map == {}

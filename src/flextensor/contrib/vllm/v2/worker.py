@@ -22,9 +22,11 @@ from flextensor.config import BLOCK_TRANSFER_MODES, OffloadConfig, load_config
 from flextensor.contrib.vllm._patterns import (
     resolve_vllm_patterns,
 )
+from flextensor.contrib.vllm.v2.breakable_cudagraph import install_breakable_segment_join
 from flextensor.contrib.vllm.v2.errors import VllmFlexTensorV2Error
 from flextensor.contrib.vllm.v2.offloader import VllmBootstrapOffloader
 from flextensor.offload_timing import OFFLOAD_TIMING_MEASURE_MAX_PASSES
+from flextensor.shared_offload import SharedOffloadSession
 from flextensor.utils import config_field_was_set
 
 LOGGER = init_logger("vllm.flextensor.v2.worker")
@@ -78,6 +80,69 @@ def _validate_enabled_worker(vllm_config: VllmConfig, offload_config: OffloadCon
     if not offload_config.external_compile:
         raise VllmFlexTensorV2Error("CompilationMode.VLLM_COMPILE requires OffloadConfig.external_compile=True")
     _validate_vllm_compile_topology(vllm_config, offload_config)
+
+
+def _load_format_name(load_format: Any) -> str:
+    value = getattr(load_format, "value", load_format)
+    return value if isinstance(value, str) else str(value)
+
+
+def _validate_shm_worker(  # noqa: C901 - each branch rejects one unsupported SHM topology.
+    vllm_config: VllmConfig,
+    offload_config: OffloadConfig,
+) -> None:
+    """Fail closed around the first validated vLLM shared-memory topology."""
+    if offload_config.profile_storage_dir is None or not offload_config.profile_read_only:
+        raise VllmFlexTensorV2Error("vLLM SHM integration requires FT_PROFILE_STORAGE_DIR and FT_PROFILE_READ_ONLY=1")
+
+    model_config = vllm_config.model_config
+    if (
+        getattr(model_config, "runner_type", None) != "generate"
+        or getattr(model_config, "convert_type", None) != "none"
+    ):
+        raise VllmFlexTensorV2Error("vLLM SHM integration requires the native, unconverted generation model")
+    if getattr(model_config, "quantization", None) is not None:
+        raise VllmFlexTensorV2Error("vLLM SHM integration does not support quantization")
+    if getattr(vllm_config, "lora_config", None) is not None:
+        raise VllmFlexTensorV2Error("vLLM SHM integration does not support LoRA")
+    if getattr(vllm_config, "speculative_config", None) is not None:
+        raise VllmFlexTensorV2Error("vLLM SHM integration does not support speculative decoding")
+
+    parallel = vllm_config.parallel_config
+    if getattr(parallel, "tensor_parallel_size", 1) != 1 or getattr(parallel, "pipeline_parallel_size", 1) != 1:
+        raise VllmFlexTensorV2Error("vLLM SHM integration currently requires TP=1 and PP=1")
+    if (
+        getattr(parallel, "prefill_context_parallel_size", 1) != 1
+        or getattr(parallel, "decode_context_parallel_size", 1) != 1
+    ):
+        raise VllmFlexTensorV2Error("vLLM SHM integration currently requires PCP=1 and DCP=1")
+    if getattr(parallel, "data_parallel_backend", None) != "mp" or getattr(parallel, "nnodes", 1) != 1:
+        raise VllmFlexTensorV2Error("vLLM SHM integration currently requires single-node data_parallel_backend='mp'")
+    if getattr(parallel, "data_parallel_external_lb", False) or getattr(parallel, "data_parallel_hybrid_lb", False):
+        raise VllmFlexTensorV2Error("vLLM SHM integration does not support external or hybrid DP load balancing")
+    unsupported_ep = any(
+        getattr(parallel, field, False)
+        for field in ("enable_expert_parallel", "enable_eplb", "enable_ep_weight_filter")
+    )
+    if unsupported_ep:
+        raise VllmFlexTensorV2Error("vLLM SHM integration does not support expert parallelism or EPLB")
+
+    load_config = getattr(vllm_config, "load_config", None)
+    load_format = getattr(load_config, "load_format", None)
+    if _load_format_name(load_format) != "auto":
+        raise VllmFlexTensorV2Error(f"vLLM SHM integration currently requires load_format='auto'; got {load_format!r}")
+
+
+def _shared_loader_api() -> tuple[str, type[Any], Callable[[Any], Any]]:
+    try:
+        from flextensor.contrib.vllm.v2.loader import (
+            _SHM_LOAD_FORMAT,
+            VllmShmLoadContext,
+            use_vllm_shm_load,
+        )
+    except ImportError as exc:
+        raise VllmFlexTensorV2Error("vLLM SHM model-loader API is unavailable") from exc
+    return _SHM_LOAD_FORMAT, VllmShmLoadContext, use_vllm_shm_load
 
 
 def _validate_vllm_compile_topology(vllm_config: VllmConfig, offload_config: OffloadConfig) -> None:
@@ -170,7 +235,11 @@ def _publish_model_to_runner(model_runner: _ModelRunner, raw_model: nn.Module, p
 class FlexTensorOffloadWorker(Worker):
     """State-takeover worker for FlexTensor vLLM integration v2."""
 
-    def load_model(self, *args: Any, **kwargs: Any) -> None:
+    def load_model(  # noqa: C901 - regular and SHM bootstraps have distinct lifecycles.
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         if self.device.index is None:
             raise VllmFlexTensorV2Error(f"worker CUDA device must have an explicit index, got {self.device}")
         offload_config = load_config(gpu_device=self.device.index)
@@ -222,6 +291,11 @@ class FlexTensorOffloadWorker(Worker):
         self._offload_config = offload_config
         LOGGER.info("FlexTensor %s offloading enabled with config: %s", __version__, offload_config)
         _validate_enabled_worker(self.vllm_config, offload_config)
+        if offload_config.shm_enabled:
+            _validate_shm_worker(self.vllm_config, offload_config)
+            self._load_model_from_shared_profile(offload_config, *args, **kwargs)
+            return
+
         timing_batch = inference_profile.timing_batch_from_env()
         profile_sample_target = max(1, offload_config.profiling_iters)
         profile_refresh_enabled = (
@@ -256,7 +330,7 @@ class FlexTensorOffloadWorker(Worker):
                     profile=saved_profile,
                 )
                 manager_active = True
-            _publish_model_to_runner(self.model_runner, raw_model, proxy)
+            self._activate_runtime(raw_model, proxy)
             self.model_runner.model_memory_usage += takeover_memory.consumed_memory
             atexit.register(flextensor.release)
             self._flextensor_previous_offloader = previous
@@ -276,6 +350,108 @@ class FlexTensorOffloadWorker(Worker):
             LOGGER.exception(
                 "FlexTensor vLLM integration v2 load failed: last_coordinate=%s",
                 getattr(locals().get("bootstrap_offloader"), "last_coordinate", None),
+            )
+            raise
+
+    def _activate_runtime(self, raw_model: nn.Module, proxy: nn.Module) -> None:
+        """Publish the proxy and install the offloader join at graph segment boundaries."""
+        _publish_model_to_runner(self.model_runner, raw_model, proxy)
+        install_breakable_segment_join()
+
+    def _load_model_from_shared_profile(  # noqa: C901 - transactional load preserves the primary failure.
+        self,
+        offload_config: OffloadConfig,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        namespace = offload_config.shm_namespace
+        profile_directory = offload_config.profile_storage_dir
+        if namespace is None or profile_directory is None:
+            raise VllmFlexTensorV2Error("vLLM SHM integration requires an explicit namespace and profile directory")
+
+        get_offloader, set_offloader = _offloader_api()
+        previous = get_offloader()
+        _validate_native_offloader(previous)
+        session = SharedOffloadSession(namespace, wait_timeout=offload_config.shm_wait_timeout)
+        self._flextensor_shared_lifecycle = True
+        cleanup = session.close
+        cleanup_registered = False
+        cleanup_failed = False
+        try:
+            atexit.register(cleanup)
+            cleanup_registered = True
+            shm_load_format, context_type, use_shm_load = _shared_loader_api()
+            load_config = self.vllm_config.load_config
+            original_load_format = load_config.load_format
+            context = context_type(
+                session=session,
+                offload_config=offload_config,
+                profile_directory=profile_directory,
+                materialize_device=self.device,
+                underlying_load_format=original_load_format,
+            )
+            bootstrap_offloader = VllmBootstrapOffloader()
+            set_offloader(bootstrap_offloader)
+            load_config.load_format = shm_load_format
+            try:
+                with use_shm_load(context):
+                    super().load_model(*args, **kwargs)
+            finally:
+                load_config.load_format = original_load_format
+
+            proxy = context.proxy
+            if proxy is None:
+                raise VllmFlexTensorV2Error("vLLM SHM loader returned without publishing its model proxy")
+            raw_model = self.model_runner.get_model()
+            if proxy._get_model() is not raw_model:  # noqa: SLF001 - package-owned proxy handoff boundary.
+                raise VllmFlexTensorV2Error("vLLM SHM loader returned a different model to the model runner")
+            bootstrap_offloader.bind_shared_runtime(proxy)
+            self._activate_runtime(raw_model, proxy)
+
+            self._flextensor_previous_offloader = previous
+            self._flextensor_bootstrap_offloader = bootstrap_offloader
+            self._flextensor_shared_session = session
+            self._flextensor_atexit_cleanup = cleanup
+            self._flextensor_shm_role = context.role
+            self._flextensor_shm_execution_logged = False
+            self._flextensor_profile_refresh_enabled = False
+            self._flextensor_replay_patch = None
+            LOGGER.info("FlexTensor vLLM integration v2 state takeover complete")
+        except BaseException as primary_error:
+            try:
+                session.close()
+            except BaseException as cleanup_error:
+                cleanup_failed = True
+                self._flextensor_previous_offloader = previous
+                self._flextensor_shared_session = session
+                if cleanup_registered:
+                    self._flextensor_atexit_cleanup = cleanup
+                if add_note := getattr(primary_error, "add_note", None):
+                    add_note(f"FlexTensor SHM cleanup failed and will be retried at process exit: {cleanup_error!r}")
+                LOGGER.exception("FlexTensor vLLM SHM cleanup failed; atexit retry retained")
+            else:
+                if cleanup_registered:
+                    try:
+                        atexit.unregister(cleanup)
+                    except BaseException as unregister_error:
+                        cleanup_failed = True
+                        self._flextensor_previous_offloader = previous
+                        self._flextensor_shared_session = session
+                        self._flextensor_atexit_cleanup = cleanup
+                        if add_note := getattr(primary_error, "add_note", None):
+                            add_note(f"FlexTensor SHM atexit cleanup could not be unregistered: {unregister_error!r}")
+                        LOGGER.exception("FlexTensor vLLM SHM atexit cleanup unregister failed")
+            try:
+                set_offloader(previous)
+            except BaseException as restore_error:
+                self._flextensor_previous_offloader = previous
+                if add_note := getattr(primary_error, "add_note", None):
+                    add_note(f"FlexTensor could not restore the native vLLM offloader: {restore_error!r}")
+                LOGGER.exception("FlexTensor could not restore the native vLLM offloader after SHM load failure")
+            LOGGER.exception(
+                "FlexTensor vLLM integration v2 SHM load failed: last_coordinate=%s cleanup_failed=%s",
+                getattr(locals().get("bootstrap_offloader"), "last_coordinate", None),
+                cleanup_failed,
             )
             raise
 
@@ -304,7 +480,19 @@ class FlexTensorOffloadWorker(Worker):
 
     def execute_model(self, scheduler_output: Any) -> Any:
         if not getattr(self, "_flextensor_profile_refresh_enabled", False):
-            return super().execute_model(scheduler_output)
+            result = super().execute_model(scheduler_output)
+            if (
+                getattr(self, "_flextensor_shared_lifecycle", False)
+                and not getattr(self, "_flextensor_shm_execution_logged", False)
+                and getattr(scheduler_output, "total_num_scheduled_tokens", 0) > 0
+            ):
+                self._flextensor_shm_execution_logged = True
+                LOGGER.info(
+                    "FlexTensor vLLM SHM execution data_parallel_index=%s role=%s",
+                    getattr(self.vllm_config.parallel_config, "data_parallel_index", None),
+                    getattr(self, "_flextensor_shm_role", None),
+                )
+            return result
         batch = inference_profile.classify_timing_batch(scheduler_output)
         if batch != self._flextensor_timing_batch:
             return super().execute_model(scheduler_output)
@@ -364,7 +552,7 @@ class FlexTensorOffloadWorker(Worker):
             state=self._flextensor_bootstrap_offloader.runtime_state,
         )
 
-    def shutdown(self) -> None:
+    def shutdown(self) -> None:  # noqa: C901 - all teardown stages run while retaining the first failure.
         replay_patch = getattr(self, "_flextensor_replay_patch", None)
         if replay_patch is not None:
             inference_profile.restore_cudagraph_replay(replay_patch)
@@ -375,11 +563,54 @@ class FlexTensorOffloadWorker(Worker):
             super().shutdown()
             return
         _get_offloader, set_offloader = _offloader_api()
+        shared_lifecycle = getattr(self, "_flextensor_shared_lifecycle", False)
+        shared_session = getattr(self, "_flextensor_shared_session", None)
+        primary_error: BaseException | None = None
+
+        def record_error(error: BaseException, action: str) -> None:
+            nonlocal primary_error
+            if primary_error is None:
+                primary_error = error
+            elif add_note := getattr(primary_error, "add_note", None):
+                add_note(f"FlexTensor shutdown also failed while {action}: {error!r}")
+
         try:
-            try:
-                set_offloader(previous)
-            finally:
+            set_offloader(previous)
+        except BaseException as error:
+            record_error(error, "restoring the native vLLM offloader")
+
+        cleanup_succeeded = False
+        try:
+            if shared_lifecycle:
+                if shared_session is not None:
+                    shared_session.close(preserve_models=False)
+            else:
                 flextensor.release()
+        except BaseException as error:
+            record_error(error, "closing the FlexTensor runtime")
+        else:
+            cleanup_succeeded = True
+
+        if shared_lifecycle and cleanup_succeeded:
+            try:
+                cleanup = getattr(self, "_flextensor_atexit_cleanup", None)
+                if cleanup is not None:
+                    atexit.unregister(cleanup)
+            except BaseException as error:
+                record_error(error, "unregistering the SHM atexit cleanup")
+            else:
+                if hasattr(self, "_flextensor_shared_session"):
+                    del self._flextensor_shared_session
+                if hasattr(self, "_flextensor_atexit_cleanup"):
+                    del self._flextensor_atexit_cleanup
+
+        if primary_error is None:
             del self._flextensor_previous_offloader
-        finally:
+
+        try:
             super().shutdown()
+        except BaseException as error:
+            record_error(error, "shutting down the vLLM worker")
+
+        if primary_error is not None:
+            raise primary_error

@@ -71,7 +71,7 @@ def _tensor_byte_view(tensor: torch.Tensor) -> torch.Tensor:
         nbytes = tensor.numel() * tensor.element_size()
         offset_bytes = tensor.storage_offset() * tensor.element_size()
         byte_tensor = torch.empty(0, dtype=torch.uint8, device=tensor.device)
-        byte_tensor.set_(tensor.untyped_storage(), offset_bytes, (nbytes,))
+        byte_tensor.set_(tensor.untyped_storage(), offset_bytes, (nbytes,))  # type: ignore[call-overload]
         return byte_tensor
 
     # Non-dense with gaps: fall back to a contiguous copy so the bytes are packed.
@@ -381,7 +381,7 @@ class ProfileBlockController:
 
     def teardown(
         self,
-        model: torch.nn.Module | dict[str, torch.Tensor] | None,
+        model: torch.nn.Module | dict[str, object] | None,
         tensors_map: Mapping[int, torch.Tensor],
     ) -> None:
         """Unpatch the model, then drop the blocks (always, via ``shutdown()``).
@@ -424,7 +424,7 @@ class ProfileBlockController:
 
     def _restore_container_entries(
         self,
-        model: torch.nn.Module | dict[str, torch.Tensor] | None,
+        model: torch.nn.Module | dict[str, object] | None,
         tensors_map: Mapping[int, torch.Tensor],
     ) -> None:
         """Rewrite ``dict`` entries that alias block views back to their originals.

@@ -10,7 +10,7 @@ dynamic = ["version"]
 description = "FlexTensor: Tensor offloading and management library"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 keywords = ["tensor", "offloading", "machine learning", "pytorch", "memory management"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -18,24 +18,27 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: POSIX",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "beartype~=0.21",
+    "beartype~=0.21; python_version < '3.14'",
+    "beartype>=0.22.2,<1; python_version >= '3.14'",
     "numpy>=1.20.0",
     "psutil>=5.9.0",
-    "pydantic>=2.7.0",
+    "pydantic>=2.7.0; python_version < '3.14'",
+    "pydantic>=2.12; python_version >= '3.14'",
     "pyyaml>=6.0",
     # Pytorch 2.5+ required for torch.Event
-    "torch>=2.5",
+    "torch>=2.5; python_version < '3.14'",
+    "torch>=2.10; python_version >= '3.14'",
     "scipy>=1.9.0",
     "proxytypes3>=1.0.1",
-    "posix-ipc~=1.3.0",
+    "posix-ipc~=1.3.0; sys_platform != 'win32'",
     "shared-memory-dict~=0.7.2",
 ]
 
@@ -46,7 +49,6 @@ test = [
     "pytest-cov>=4.0.0",
     "mypy>=1.10",
     "requests~=2.32",
-    "tomli>=2.0; python_version < '3.11'",
     "types-PyYAML>=6.0",
     "types-psutil>=5.9",
     "scipy-stubs>=1.4",
@@ -96,7 +98,6 @@ strict_equality = true
 [[tool.mypy.overrides]]
 module = [
     "beartype", "beartype.claw",
-    "cupy", "cupy.cuda", "cupy.cuda.runtime",
     "posix_ipc",
     "proxytypes3",
     "safetensors", "safetensors.torch",
@@ -116,6 +117,12 @@ addopts = [
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "gpu_count_1: Test requires one visible GPU",
+    "gpu_count_2: Test requires two visible GPUs",
+    "gpu_count_4: Test requires four visible GPUs",
+    "gpu_count_min_1: Test requires at least one visible GPU",
+    "gpu_count_min_2: Test requires at least two visible GPUs",
+    "gpu_count_min_4: Test requires at least four visible GPUs",
     "gpu_vram_24g: Test requires exact 24GB GPU VRAM runner",
     "gpu_vram_40g: Test requires exact 40GB GPU VRAM runner",
     "gpu_vram_48g: Test requires exact 48GB GPU VRAM runner",
@@ -220,9 +227,15 @@ forbidden_modules = [
     "flextensor.shm",
 ]
 
+[[tool.importlinter.contracts]]
+name = "Core is dependency-light"
+type = "forbidden"
+source_modules = ["flextensor.core"]
+forbidden_modules = ["flextensor.*"]
+
 [tool.ruff]
 preview = true
-target-version = "py310"
+target-version = "py311"
 line-length = 120
 indent-width = 4
 
@@ -268,6 +281,15 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # Ignore unused imports in __init__.py files that are used for exporting the public API
 "examples/**/*.py" = ["T201"]  # runnable examples print progress/results to stdout by design
+# Vendored benchmark driver. Keep changes behavior-preserving unless the published measurements are
+# refreshed; style-only rewrites make review against the measured artifact unnecessarily difficult.
+# It monkey-patches LTX internals by design (SLF001), imports after distributed init because
+# rank/device must be set first (E402), and mirrors upstream's naming (N8xx).
+"examples/ltx23/outpaint/benchmarks/integrated_e2e.py" = [
+    "RUF052", "SLF001", "E402", "E501", "N802", "N803", "N805", "N806", "N812", "N814",
+    "S110", "PTH103", "PTH207", "SIM105", "SIM108", "C408", "C901", "UP031", "ERA001",
+    "RUF012", "RUF046",
+]
 "tests/**/*.py" = [
     "BLE001",  # broad Exception allowed for transient OS/IPC failures
     "RUF100",  # do not remove "unused" noqa (e.g. BLE001) so intent comments stay

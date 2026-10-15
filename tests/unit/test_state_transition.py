@@ -83,6 +83,30 @@ def test_plan_groups_aliases_by_storage_and_orders_for_capacity() -> None:
     assert plan.peak_gpu_bytes == 8
 
 
+def test_plan_accepts_expanded_tensor_larger_than_storage() -> None:
+    expanded = ModelPlacementState(
+        tensors=(
+            TensorState(
+                id="tensor:0",
+                names=("scale",),
+                storage_id="storage:0",
+                logical_bytes=16,
+                kind="buffer",
+            ),
+        ),
+        storages=(StorageState(id="storage:0", device="cpu", nbytes=4, pinned=False),),
+    )
+
+    plan = plan_state_transition(
+        expanded,
+        expanded,
+        transition=TransitionSpec(),
+        capacity=MemoryCapacity(host_bytes=0, gpu_bytes=0),
+    )
+
+    assert plan.migrations == ()
+
+
 def test_plan_prefers_promotions_when_both_directions_fit() -> None:
     current = _state()
     target = _state(first_device="cuda:0", second_device="cpu")

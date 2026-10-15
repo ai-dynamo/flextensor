@@ -7,7 +7,6 @@ set -xeo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../_install_requirements.sh
 source "$SCRIPT_DIR/../_install_requirements.sh"
-export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 
 # Install test-specific requirements if not in CI (CI installs with flextensor for proper dependency resolution)
 if [ -z "${CI:-}" ] && [ -f "$SCRIPT_DIR/requirements.txt" ]; then

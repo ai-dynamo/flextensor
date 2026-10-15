@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Memory transfer interpolation utilities for predicting transfer times and sizes."""
 
+from typing import cast
+
 import numpy as np
 
 
@@ -151,7 +153,7 @@ class MemoryTransferInterpolator:
         bytes_val = self.bytes_array[-1]
         duration_sec = self.duration_array[-1] / 1000.0  # Convert ms to seconds
         mb = bytes_val / (1024 * 1024)  # Convert bytes to MB
-        return mb / duration_sec
+        return cast("float", mb / duration_sec)
 
     def __repr__(self) -> str:
         return (

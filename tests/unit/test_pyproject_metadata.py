@@ -2,13 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 import pathlib
 import re
-import sys
+import tomllib
 from collections.abc import Iterable
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
 
 
 def _dependency_names(dependencies: Iterable[str | dict[str, str]]) -> set[str]:

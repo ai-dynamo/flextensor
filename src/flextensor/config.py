@@ -12,14 +12,14 @@ import difflib
 import json
 import logging
 import os
+import sys
 import types
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Annotated, Any, Literal, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Self, Union, get_args, get_origin
 
 import yaml
 from pydantic import BaseModel, Field, WithJsonSchema, field_validator, model_validator
-from typing_extensions import Self
 
 from flextensor.host_pinning import PinnedMemoryMode
 from flextensor.strategy import AdaptiveStrategy, Strategy
@@ -97,22 +97,30 @@ class OffloadConfig(BaseModel):
     shm_enabled: bool = Field(default=False)
     """Enable cross-process weight sharing via POSIX shared memory.
 
-    When True, model weights are stored in shared memory so multiple processes
-    (e.g., vLLM data-parallel replicas) share a single copy in CPU RAM.
+    When true, model weights are stored in shared memory so multiple processes
+    can share a single copy in CPU RAM. This selects SHM-backed allocation and
+    requires a non-empty :attr:`shm_namespace` at configuration time. A
+    multi-process application must also coordinate one creator with its
+    followers. Enabling this flag alone does not elect a creator or build
+    follower models on the meta device.
     Can also be set via the ``FT_SHM_ENABLED`` env var.
     """
 
     shm_namespace: str | None = Field(default=None)
     """Base namespace for shared memory blocks.
 
-    If None, auto-derived from model path + config hash.
+    Must be set explicitly when :attr:`shm_enabled` is true. Applications that
+    have a stable model path may derive a value with
+    :func:`flextensor.shm.compute_shm_namespace` before initializing a manager.
     Can also be set via FT_SHM_NAMESPACE env var.
     """
 
     shm_wait_timeout: float = Field(default=0.0, ge=0.0)
-    """Hard wall-clock timeout (seconds) for followers waiting on creator.
+    """Timeout (seconds) for followers waiting on creator.
 
-    0 means no hard limit — rely on heartbeat liveness detection only.
+    0 means no overall limit; followers still use creator-heartbeat liveness
+    detection. A positive value also bounds coordination-lock acquisition,
+    though scheduler delays can make observed elapsed time slightly longer.
     Can also be set via FT_SHM_WAIT_TIMEOUT env var.
     """
 
@@ -464,6 +472,15 @@ class OffloadConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _validate_shm_namespace(self) -> Self:
+        """Require a stable, visible namespace whenever SHM is enabled."""
+        if self.shm_enabled and sys.platform == "win32":
+            raise ValueError("Shared memory (SHM) is not supported on Windows")
+        if self.shm_enabled and (self.shm_namespace is None or not self.shm_namespace.strip()):
+            raise ValueError("shm_namespace must be non-empty when shm_enabled=True")
+        return self
+
+    @model_validator(mode="after")
     def _validate_profile_mode(self) -> Self:
         """Validate the publicly-observable ``profile_mode`` / ``transfer_mode``
         combinations at config construction so errors fail fast before the
@@ -500,7 +517,7 @@ class OffloadConfig(BaseModel):
         if not update:
             return super().model_copy(deep=deep)
 
-        validated_update = self._reject_removed_fields(dict(update))
+        validated_update = self._reject_removed_fields(dict(update))  # type: ignore[operator]
         copied = super().model_copy(update=validated_update, deep=deep)
         revalidated = type(self).model_validate(copied.model_dump())
         object.__setattr__(revalidated, "__pydantic_fields_set__", set(copied.model_fields_set))

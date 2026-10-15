@@ -277,7 +277,7 @@ class TestSyncPrimitivesMultithread:
         file_timeouts = []
         clock = iter([10.0, 10.12])
         monkeypatch.setattr(time, "monotonic", lambda: next(clock))
-        monkeypatch.setattr(lock, "_acquire_thread_lock", lambda *_: None)
+        monkeypatch.setattr(lock, "_acquire_thread_lock", lambda *_: lock._thread_lock.acquire())
         monkeypatch.setattr(lock, "_acquire_file_lock", lambda _, timeout: file_timeouts.append(timeout))
 
         try:

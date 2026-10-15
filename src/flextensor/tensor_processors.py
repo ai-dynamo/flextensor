@@ -6,7 +6,7 @@ import logging
 import statistics
 import types
 from collections.abc import Callable
-from typing import Any, ClassVar, Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, TypedDict, cast, runtime_checkable
 
 import torch
 
@@ -291,15 +291,65 @@ class TensorTypeHandler:
         return ctx.process_and_preserve(value)
 
 
-class SequenceTypeHandler:
-    """Handler for plain ``list`` and ``tuple`` attributes."""
+class _ReachableContainerTypeHandler:
+    """Read-only traversal that skips values which cannot contain tensors.
+
+    A container already being traversed higher up the stack (a dict or list that contains itself) is returned
+    as-is instead of recursing forever.
+    """
+
+    _LEAF_TYPES = (types.NoneType, bool, int, float, complex, str, bytes)
+
+    def __init__(self) -> None:
+        self._in_progress: set[int] = set()
 
     def can_handle(self, value: Any) -> bool:
-        return type(value) in {list, tuple}
+        return isinstance(value, (dict, set)) or type(value) in (list, tuple)
 
-    def process_attribute(self, value: list | tuple, ctx: ProcessingContext) -> list | tuple:
-        for item in value:
-            ctx.dispatch(item)
+    def process_attribute(self, value: dict | list | set | tuple, ctx: ProcessingContext) -> object:
+        value_id = id(value)
+        if value_id in self._in_progress:
+            return value
+        self._in_progress.add(value_id)
+        try:
+            values = value.values() if isinstance(value, dict) else value
+            for item in values:
+                if type(item) not in self._LEAF_TYPES:
+                    ctx.dispatch(item)
+        finally:
+            self._in_progress.discard(value_id)
+        return value
+
+
+class _ObjectAttributesTypeHandler:
+    """Read-only traversal of tensor-bearing attributes on plain objects.
+
+    Python module objects are namespaces, not model state, and are skipped: an engine object holding a module
+    reference (e.g. SGLang's ``GroupCoordinator.device_module`` set to ``torch.cuda``) would otherwise lead the
+    walk into ``sys.modules`` and every loaded module.
+    """
+
+    def __init__(self) -> None:
+        self._visited: set[int] = set()
+
+    def reset(self) -> None:
+        """Forget objects visited during the previous traversal."""
+        self._visited.clear()
+
+    def can_handle(self, value: Any) -> bool:
+        # CPython type metadata avoids slow static reflection on every dispatched value.
+        return (
+            not isinstance(value, (type, types.ModuleType, torch.Tensor, torch.nn.Module))
+            and getattr(type(value), "__dictoffset__", 0) != 0
+        )
+
+    def process_attribute(self, value: object, ctx: ProcessingContext) -> object:
+        value_id = id(value)
+        if value_id in self._visited:
+            return value
+        self._visited.add(value_id)
+        for field in vars(value).values():
+            ctx.dispatch(field)
         return value
 
 
@@ -309,7 +359,7 @@ class SetTypeHandler:
     def can_handle(self, value: Any) -> bool:
         return isinstance(value, set) and len(value) > 0
 
-    def process_attribute(self, value: set, ctx: ProcessingContext) -> set:
+    def process_attribute(self, value: set[Any], ctx: ProcessingContext) -> set[Any]:
         return {ctx.dispatch(v) for v in value}
 
 
@@ -334,7 +384,7 @@ class LegacySetTypeHandler:
         """Return True for non-empty sets."""
         return isinstance(value, set) and len(value) > 0
 
-    def process_attribute(self, value: set, ctx: ProcessingContext) -> set:
+    def process_attribute(self, value: set[Any], ctx: ProcessingContext) -> set[Any]:
         """Process each element via ``ctx.process()`` — no handler dispatch or Parameter preservation."""
         return {ctx.process(v) for v in value}
 
@@ -349,8 +399,8 @@ class DictTypeHandler:
     def can_handle(self, value: Any) -> bool:
         return isinstance(value, dict)
 
-    def process_attribute(self, value: dict, ctx: ProcessingContext) -> dict:
-        new_dict: dict = collections.OrderedDict() if isinstance(value, collections.OrderedDict) else {}
+    def process_attribute(self, value: dict[Any, Any], ctx: ProcessingContext) -> dict[Any, Any]:
+        new_dict = collections.OrderedDict() if isinstance(value, collections.OrderedDict) else {}
         any_changed = False
         for key, v in value.items():
             new_v = ctx.dispatch(v)
@@ -399,8 +449,8 @@ class TensorProcessor:
     def __init__(
         self,
         update_attributes: bool = True,
-        recursive=True,
-        process_dict=True,
+        recursive: bool = True,
+        process_dict: bool = True,
         force_update_nn_parameters: bool = False,
         type_handlers: list[TypeHandler] | None = None,
     ):
@@ -416,7 +466,7 @@ class TensorProcessor:
         self._visited: set[int] = set()
         self._skipped_visited_modules: list[tuple[str, int]] = []
 
-    def apply(self, model):
+    def apply(self, model: object) -> None:
         # Reset between applications so each call starts with a clean slate.
         self._visited = set()
         self._skipped_visited_modules = []
@@ -427,10 +477,10 @@ class TensorProcessor:
         self._log_skipped_visited_modules()
         self.cleanup()
 
-    def process(self, _src):
+    def process(self, _src: object) -> Any:
         pass
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         pass
 
     @classmethod
@@ -494,13 +544,13 @@ class TensorProcessor:
             details,
         )
 
-    def _process_inner_fields(self, src, new_tensor):
+    def _process_inner_fields(self, src: object, new_tensor: object) -> None:
         ref_tensor_fields = set(dir(src))
         # Use class-level attributes to detect instance-specific fields
         # This ensures we find custom attributes like weight.scale even when new_tensor = src
         new_tensor_fields = set(dir(new_tensor.__class__))
-        missing_fields = ref_tensor_fields - new_tensor_fields
-        missing_fields = [name for name in missing_fields if not name.startswith("_")]
+        missing_fields_set = ref_tensor_fields - new_tensor_fields
+        missing_fields = [name for name in missing_fields_set if not name.startswith("_")]
         for missing_field in missing_fields:
             field = getattr(src, missing_field)
             if isinstance(field, torch.Tensor):
@@ -509,7 +559,7 @@ class TensorProcessor:
             else:
                 setattr(new_tensor, missing_field, field)
 
-    def _process_dict(self, dict_model, _name):
+    def _process_dict(self, dict_model: dict[object, object], _name: str) -> None:
         if not self.process_dict:
             return
         updated_attributes = {}
@@ -519,7 +569,7 @@ class TensorProcessor:
             for attr_name, attr_value in updated_attributes.items():
                 dict_model[attr_name] = attr_value
 
-    def _process_module(self, module, _name):
+    def _process_module(self, module: Any, _name: str) -> Any:
         # torch.compile wraps modules in an OptimizedModule that forwards
         # attribute writes to its _orig_mod; processing the wrapper would wipe
         # the real module's _parameters/_buffers (see _unwrap_compiled_module).
@@ -537,12 +587,15 @@ class TensorProcessor:
                     # Replace the child module with its extended version
                     self._apply_on(self._process_module(child_module, child_name))
 
-    def _apply_on(self, model):
+    def _apply_on(self, model: object) -> None:
         updated_attributes = {}
         if hasattr(model, "__dict__"):
             ctx = ProcessingContext(self)
             for attr_name, attr_value in model.__dict__.items():
-                updated_attributes[attr_name] = ctx.dispatch(attr_value)
+                new_value = ctx.dispatch(attr_value)
+                # Reassigning unchanged values can register deliberately hidden nn.Modules.
+                if new_value is not attr_value:
+                    updated_attributes[attr_name] = new_value
 
         if self.update_attributes:
             for key, value in updated_attributes.items():
@@ -563,15 +616,15 @@ class MoveToPinMemoryTensorProcessor(TensorProcessor):
     ``cudaHostRegister`` again.
     """
 
-    def __init__(self, host_pinner: HostPinner):
+    def __init__(self, host_pinner: HostPinner) -> None:
         super().__init__()
         self.host_pinner = host_pinner
         self.cache: dict[int, torch.Tensor] = {}
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         self.cache = {}
 
-    def process(self, src):
+    def process(self, src: object) -> object:
         if not isinstance(src, torch.Tensor) or src.is_meta:
             return src
         if src.device != torch.device("cpu"):
@@ -599,16 +652,22 @@ class DisableRequiresGradTensorProcessor(TensorProcessor):
 
 @instrumentable
 class MoveToGPUTensorProcessor(TensorProcessor):
-    def __init__(self, device_gpu, process_inner_fields=True, recursive=True, process_dict=True):
+    def __init__(
+        self,
+        device_gpu: torch.device,
+        process_inner_fields: bool = True,
+        recursive: bool = True,
+        process_dict: bool = True,
+    ) -> None:
         super().__init__(recursive=recursive, process_dict=process_dict)
         self.device_gpu = device_gpu
-        self.cache = {}
+        self.cache: dict[int, torch.Tensor] = {}
         self.process_inner_fields = process_inner_fields
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         self.cache = {}
 
-    def process(self, src):
+    def process(self, src: object) -> object:
         if not isinstance(src, torch.Tensor) or src.is_meta:
             return src
         src_tensor_id = id(src)
@@ -625,19 +684,19 @@ class MoveToGPUTensorProcessor(TensorProcessor):
 
 @instrumentable
 class MoveUnmappedTensorsToGPUProcessor(TensorProcessor):
-    def __init__(self, device_gpu, tensor_id_mapping):
+    def __init__(self, device_gpu: torch.device, tensor_id_mapping: dict[int, torch.Tensor]) -> None:
         super().__init__()
         self.tensor_id_mapping = tensor_id_mapping
         self.device_gpu = torch.device(device_gpu)
         self.move_to_gpu = MoveToGPUTensorProcessor(device_gpu, process_inner_fields=False)
-        self.cache = {}
+        self.cache: dict[int, torch.Tensor] = {}
         self.unmapped_gpu_bytes = 0
 
-    def apply(self, model):
+    def apply(self, model: object) -> None:
         self.unmapped_gpu_bytes = 0  # Reset before processing to ensure fresh count on reuse
         super().apply(model)
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         self.cache = {}
         self.move_to_gpu.cleanup()
 
@@ -661,7 +720,7 @@ class MoveUnmappedTensorsToGPUProcessor(TensorProcessor):
             "FlexTensor cannot finalize this model without exceeding available CUDA memory."
         )
 
-    def process(self, src):
+    def process(self, src: object) -> object:
         if not isinstance(src, torch.Tensor) or src.is_meta:
             return src
         src_tensor_id = id(src)
@@ -673,7 +732,7 @@ class MoveUnmappedTensorsToGPUProcessor(TensorProcessor):
             new_tensor = self.tensor_id_mapping[src_tensor_id]
         else:
             self._guard_unmapped_cuda_move(src)
-            new_tensor = self.move_to_gpu.process(src)
+            new_tensor = cast("torch.Tensor", self.move_to_gpu.process(src))
             # Track GPU memory used by unmapped tensors
             if new_tensor.device.type == "cuda":
                 self.unmapped_gpu_bytes += new_tensor.numel() * new_tensor.element_size()
@@ -685,7 +744,7 @@ class MoveUnmappedTensorsToGPUProcessor(TensorProcessor):
 
 @instrumentable
 class MoveBuffersToGPUTensorProcessor(TensorProcessor):
-    def __init__(self, device_gpu):
+    def __init__(self, device_gpu: torch.device) -> None:
         # Buffers only exist in modules, not in dictionaries, so process_dict=False
         super().__init__(update_attributes=False, process_dict=False)
         self.device_gpu = device_gpu
@@ -693,10 +752,10 @@ class MoveBuffersToGPUTensorProcessor(TensorProcessor):
             device_gpu, process_inner_fields=True, recursive=False, process_dict=False
         )
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         self.move_to_gpu.cleanup()
 
-    def _process_module(self, module, _name):
+    def _process_module(self, module: Any, _name: str) -> Any:
         module = _unwrap_compiled_module(module)
         if not self._mark_module_visited(module, _name):
             return module
@@ -704,7 +763,7 @@ class MoveBuffersToGPUTensorProcessor(TensorProcessor):
         # Move all buffers in this module to GPU
         for buffer_name, buffer in module.named_buffers(recurse=False, remove_duplicate=False):
             new_buffer = self.move_to_gpu.process(buffer)
-            module.register_buffer(buffer_name, new_buffer)
+            module.register_buffer(buffer_name, cast("torch.Tensor", new_buffer))
 
         # Recursively process child modules
         if self.recursive:
@@ -717,31 +776,56 @@ class MoveBuffersToGPUTensorProcessor(TensorProcessor):
 
 @instrumentable
 class TensorReplacementProcessor(TensorProcessor):
-    def __init__(self, tensor_id_mapping, update_nn_parameters=True):
+    """Replace mapped tensors, preserving meta Parameter subclasses.
+
+    Meta parameters are rebound without rerunning subclass constructors, with
+    their instance attributes preserved. ``parameter_factory`` can override
+    this for subclasses requiring custom reconstruction.
+    """
+
+    def __init__(
+        self,
+        tensor_id_mapping: dict[int, torch.Tensor],
+        update_nn_parameters: bool = True,
+        *,
+        parameter_factory: ParameterFactory | None = None,
+    ) -> None:
         super().__init__()
         self.tensor_id_mapping = tensor_id_mapping
         self.update_nn_parameters = update_nn_parameters
+        self.parameter_factory = parameter_factory
+        self.cache: dict[int, torch.Tensor] = {}
+
+    def cleanup(self) -> None:
         self.cache = {}
 
-    def cleanup(self):
-        self.cache = {}
-
-    def process(self, src):
-        if not isinstance(src, torch.Tensor) or src.is_meta:
+    def process(self, src: object) -> object:
+        if not isinstance(src, torch.Tensor):
             return src
         src_tensor_id = id(src)
         if src_tensor_id in self.cache:
             return self.cache[src_tensor_id]
         if src_tensor_id not in self.tensor_id_mapping:
-            self._process_inner_fields(src, src)
+            if not src.is_meta:
+                self._process_inner_fields(src, src)
             return src
         new_tensor = self.tensor_id_mapping[src_tensor_id]
-        if self.update_nn_parameters:
+        if src.is_meta:
             if isinstance(src, torch.nn.parameter.Parameter):
+                # Unwrap a mapped Parameter so the source subtype and grad flag win.
+                new_data = new_tensor.detach() if isinstance(new_tensor, torch.nn.Parameter) else new_tensor
+                if self.parameter_factory is not None:
+                    new_tensor = self.parameter_factory(src, new_data)
+                else:
+                    # Constructors such as vLLM's require metadata beyond data.
+                    new_tensor = torch.nn.Parameter.__new__(type(src), new_data, requires_grad=src.requires_grad)
+                    new_tensor.__dict__.update(src.__dict__)
+        elif isinstance(src, torch.nn.parameter.Parameter):
+            if self.update_nn_parameters:
                 src.data = new_tensor
                 new_tensor = src
-        elif isinstance(src, torch.nn.parameter.Parameter):
-            new_tensor = torch.nn.parameter.Parameter(data=new_tensor, requires_grad=src.requires_grad)
+            else:
+                new_tensor = torch.nn.parameter.Parameter(data=new_tensor, requires_grad=src.requires_grad)
 
         self._process_inner_fields(src, new_tensor)
 
@@ -753,11 +837,11 @@ class TensorReplacementProcessor(TensorProcessor):
 class TensorMappingProcessor(TensorProcessor):
     def __init__(
         self,
-    ):
+    ) -> None:
         super().__init__(update_attributes=False)
-        self.tensors_map = {}
+        self.tensors_map: dict[int, torch.Tensor] = {}
 
-    def get_results(self):
+    def get_results(self) -> dict[int, torch.Tensor]:
         """
         Get tensor mapping
 
@@ -766,17 +850,17 @@ class TensorMappingProcessor(TensorProcessor):
         """
         return self.tensors_map
 
-    def map_inner_fields(self, src):
+    def map_inner_fields(self, src: object) -> None:
         ref_tensor_fields = set(dir(src))
         new_tensor_fields = set(dir(torch.Tensor))
-        missing_fields = ref_tensor_fields - new_tensor_fields
-        missing_fields = [name for name in missing_fields if not name.startswith("_")]
+        missing_fields_set = ref_tensor_fields - new_tensor_fields
+        missing_fields = [name for name in missing_fields_set if not name.startswith("_")]
         for missing_field in missing_fields:
             field = getattr(src, missing_field)
             if isinstance(field, torch.Tensor):
                 self.process(field)
 
-    def process(self, src):
+    def process(self, src: object) -> object:
         # Only process tensor results, skip non-tensor returns
         # Skip processing meta tensors (they have no data to transfer)
         if not isinstance(src, torch.Tensor) or src.is_meta:
@@ -791,6 +875,13 @@ class TensorMappingProcessor(TensorProcessor):
         return src
 
 
+class BenchmarkResults(TypedDict):
+    """Return type for :meth:`BenchmarkTensorProcessor.get_results`."""
+
+    tensor_statistics_map: dict[int, TensorStatistics]
+    tensors_map: dict[int, torch.Tensor]
+
+
 @instrumentable
 class ReachableTensorMapProcessor(TensorProcessor):
     """Collect every tensor reachable from a model, keyed by ``id(tensor)``.
@@ -801,16 +892,22 @@ class ReachableTensorMapProcessor(TensorProcessor):
     tensors — their ``id()`` doesn't correspond to a real allocation, so
     they aren't useful as a narrowing input.
 
-    Adds list and tuple traversal to the standard :class:`TensorProcessor`
-    walk. The convenience wrapper :func:`compute_reachable_tensor_map` is the
-    typical entry point for callers that need the tensor objects.
+    Adds list, tuple, and plain-object attribute traversal to the standard
+    :class:`TensorProcessor` walk. The convenience wrapper
+    :func:`compute_reachable_tensor_map` is the typical entry point for callers
+    that need the tensor objects.
     """
 
     def __init__(self) -> None:
-        super().__init__(update_attributes=False, type_handlers=[SequenceTypeHandler()])
+        self._object_attributes_handler = _ObjectAttributesTypeHandler()
+        super().__init__(
+            update_attributes=False,
+            type_handlers=[_ReachableContainerTypeHandler(), self._object_attributes_handler],
+        )
         self.reachable_tensors: dict[int, torch.Tensor] = {}
 
     def apply(self, model: object) -> None:
+        self._object_attributes_handler.reset()
         # ``ModelDict`` is intentionally not imported here: tensor_manager
         # imports this module, so support the wrapper structurally via items().
         self._visited = set()
@@ -835,7 +932,7 @@ class ReachableTensorMapProcessor(TensorProcessor):
             if not missing_field.startswith("_"):
                 ctx.dispatch(getattr(src, missing_field))
 
-    def process(self, src: Any) -> Any:
+    def process(self, src: object) -> object:
         if not isinstance(src, torch.Tensor) or src.is_meta:
             return src
         tensor_id = id(src)
@@ -886,16 +983,16 @@ class BenchmarkTensorProcessor(TensorProcessor):
         self,
         device_gpu: torch.device,
         iterations: int = 10,
-    ):
+    ) -> None:
         super().__init__(update_attributes=False)
         self.iterations = iterations
         self.warmup_iterations = 5
         self.device_gpu = device_gpu
-        self.tensor_statistics_map = {}
-        self.tensors_map = {}
-        self.cache_results = {}
+        self.tensor_statistics_map: dict[int, TensorStatistics] = {}
+        self.tensors_map: dict[int, torch.Tensor] = {}
+        self.cache_results: dict[str, float] = {}
 
-    def get_results(self):
+    def get_results(self) -> BenchmarkResults:
         """
         Get benchmark results.
 
@@ -909,17 +1006,17 @@ class BenchmarkTensorProcessor(TensorProcessor):
             "tensors_map": self.tensors_map,
         }
 
-    def benchmark_inner_fields(self, src):
+    def benchmark_inner_fields(self, src: object) -> None:
         ref_tensor_fields = set(dir(src))
         new_tensor_fields = set(dir(torch.Tensor))
-        missing_fields = ref_tensor_fields - new_tensor_fields
-        missing_fields = [name for name in missing_fields if not name.startswith("_")]
+        missing_fields_set = ref_tensor_fields - new_tensor_fields
+        missing_fields = [name for name in missing_fields_set if not name.startswith("_")]
         for missing_field in missing_fields:
             field = getattr(src, missing_field)
             if isinstance(field, torch.Tensor):
                 self.process(field)
 
-    def process(self, src):
+    def process(self, src: object) -> object:
         # Only process tensor results, skip non-tensor returns
         # Skip processing meta tensors (they have no data to transfer)
         if not isinstance(src, torch.Tensor) or src.is_meta:
@@ -966,15 +1063,15 @@ class BenchmarkTensorProcessor(TensorProcessor):
 
 
 def preprocess_model(
-    model,
-    tensor_manager,
-    device_gpu,
-    disable_gradient=True,
-    pin_memory=False,
+    model: object,
+    tensor_manager: Any,  # TensorManager; Any avoids circular import
+    device_gpu: torch.device,
+    disable_gradient: bool = True,
+    pin_memory: bool = False,
     *,
     host_pinner: HostPinner,
-    move_top_level_buffers_to_gpu=True,
-):
+    move_top_level_buffers_to_gpu: bool = True,
+) -> None:
     if pin_memory:
         move_to_pinned_memory = MoveToPinMemoryTensorProcessor(host_pinner)
         move_to_pinned_memory.apply(model)
@@ -1027,7 +1124,7 @@ def create_model_with_shared_tensors(source_model: torch.nn.Module) -> torch.nn.
     return new_model
 
 
-def _copy_modules_with_shared_tensors(source_module: torch.nn.Module, target_module: torch.nn.Module):
+def _copy_modules_with_shared_tensors(source_module: torch.nn.Module, target_module: torch.nn.Module) -> None:
     """Recursively copy modules with shared tensors."""
 
     # Copy plain attributes, rebinding bound methods to target module.

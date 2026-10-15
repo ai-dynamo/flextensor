@@ -8,6 +8,7 @@ algorithms to find optimal offloading configurations.
 
 import math
 import warnings
+from typing import Any, cast
 
 import numpy as np
 
@@ -288,7 +289,7 @@ class GlobalOffloadStrategy:
         transfer_sizes = layer_sizes[1:] if len(layer_sizes) > 1 else layer_sizes
 
         # Use external assignment strategy (guaranteed non-None by caller check)
-        best_assignment = self.assignment_strategy.compute(transfer_sizes, n_blocks)  # type: ignore[union-attr]
+        best_assignment = self.assignment_strategy.compute(transfer_sizes, n_blocks)
 
         # Calculate block sizes based on actual transfer volumes
         block_sizes = self._calculate_block_sizes_for_assignment(transfer_sizes, best_assignment, n_blocks)
@@ -884,8 +885,9 @@ class GlobalTensorSelectionStrategy:
             fixed_offload_sizes_arr[layer_idx] = size
 
         # Block assignment: precompute per-block layer index masks
+        layer_to_block_obj: Any = layer_to_block
         layer_to_block_list = (
-            list(layer_to_block.values()) if isinstance(layer_to_block, dict) else list(layer_to_block)
+            list(layer_to_block_obj.values()) if isinstance(layer_to_block_obj, dict) else list(layer_to_block_obj)
         )
         block_layer_indices: list[np.ndarray] = []
         for b in range(n_blocks):
@@ -908,8 +910,8 @@ class GlobalTensorSelectionStrategy:
                     j += 1
                 next_real_transfer[i] = min(j, num_layers)
 
-        # No type annotations on inner function — avoids beartype overhead on ~5000 calls
-        def objective(solution):  # noqa: C901
+        # Keep this loosely typed to avoid beartype work inside optimizer loops.
+        def objective(solution: Any) -> Any:  # noqa: C901
             """Objective function for tensor selection optimization (minimization).
 
             Solution format: [tensor_0, tensor_1, ..., tensor_N, scale]
@@ -921,7 +923,9 @@ class GlobalTensorSelectionStrategy:
             # Vectorized: compute per-layer offload sizes via bincount
             offload_mask = solution[:num_tensors] > 0.5
             offloaded_sizes = np.where(offload_mask, tensor_sizes_arr, 0.0)
-            layer_offload_sizes = np.bincount(tensor_layer_idx_arr, weights=offloaded_sizes, minlength=num_layers)
+            layer_offload_sizes = np.asarray(
+                np.bincount(tensor_layer_idx_arr, weights=offloaded_sizes, minlength=num_layers), dtype=np.float64
+            )
             layer_offload_sizes += fixed_offload_sizes_arr
 
             # Block sizes: max TRANSFER size across layers in each block.
@@ -1015,7 +1019,9 @@ class GlobalTensorSelectionStrategy:
         def _peak_for_solution(solution: np.ndarray) -> float:
             offload_mask = solution[:num_tensors] > 0.5
             offloaded = np.where(offload_mask, tensor_sizes_arr, 0.0)
-            per_layer = np.bincount(tensor_layer_idx_arr, weights=offloaded, minlength=num_layers)
+            per_layer = np.asarray(
+                np.bincount(tensor_layer_idx_arr, weights=offloaded, minlength=num_layers), dtype=np.float64
+            )
             per_layer += fixed_offload_sizes_arr
             if num_layers > 1:
                 blk_mem = 0.0
@@ -1119,7 +1125,7 @@ class GlobalTensorSelectionStrategy:
                 max_stall=self.max_early_stop,
                 objective_func=objective,
             )
-            result = dual_annealing(
+            result: Any = dual_annealing(
                 objective,
                 bounds=sa_bounds,
                 x0=x0,
@@ -1143,14 +1149,14 @@ class GlobalTensorSelectionStrategy:
             )
             result = differential_evolution(
                 objective,
-                bounds=opt_bounds,
+                bounds=cast("Any", opt_bounds),
                 integrality=integrality_flags,
                 init=starting_solutions_arr,
                 maxiter=self.epoch,
                 tol=0.01,
                 seed=self.seed if self.seed is not None else 42,
                 polish=False,
-                callback=early_stop,
+                callback=cast("Any", early_stop),
             )
 
         # Extract solution — fall back to fixed-only tensors if optimizer produced NaN

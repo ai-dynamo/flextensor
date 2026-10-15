@@ -453,7 +453,7 @@ class TestRestoreStateWithValidation:
         with pytest.raises(ValueError, match="buffer"):
             self.handler.restore_state(self.model, state, strict=True)
 
-    def test_restore_state_rejects_empty_shm_map_when_shm_is_enabled(self):
+    def test_follower_restore_rejects_empty_shm_map_when_shm_is_enabled(self):
         state = create_mock_state(self.model_tensor_names, model=self.model)
         state.loader_type = "allocation_block_transfer"
         state.release_strategy = {}
@@ -468,7 +468,7 @@ class TestRestoreStateWithValidation:
         self.mock_tm.use_shm = True
 
         with pytest.raises(ValueError, match="shm_block_name_map"):
-            self.handler.restore_state(self.model, state, strict=True)
+            self.handler.restore_state(self.model, state, strict=True, load_from_shm=True)
 
     def test_restore_state_rejects_shared_storage_for_block_loader(self):
         storage = torch.arange(8, dtype=torch.float32)

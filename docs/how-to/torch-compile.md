@@ -15,10 +15,29 @@ There are two paths, in order of preference:
 | **`compile_fn` on `offload()`** | Default — compiled offload with break-free custom ops |
 | **`external_compile=True` + external compile** | Your pipeline already calls `torch.compile` outside FlexTensor |
 
-Under offload, compile **one offloaded unit per graph** (typically per block).
+Under offload, compile **one offloaded unit per graph**. Do not guess a
+container such as `model.layers` — use [`offload_units()`](../api/offload-manager.md#flextensor.offload_manager.OffloadManager.offload_units)
+(same set `compile_fn` wraps). GPU-resident islands are
+[`resident_units()`](../api/offload-manager.md#flextensor.offload_manager.OffloadManager.resident_units).
 Whole-model `torch.compile` is not supported for correct output: rolling GPU
 weight slots can alias inside one monolithic graph. With `compile_fn`, FlexTensor
 applies compile at the same granularity as offload automatically.
+
+## Inductor compatibility
+
+Some Inductor builds lose mutation-renamed reads from tiling scores, changing
+compiled output. FlexTensor corrects the known source pattern when constructing
+compiled-offload forwards, before profiling. The defect exists in Torch 2.10
+and 2.14; numerical effects depend on the graph, device, shapes, and layouts.
+
+The correction changes Inductor's Python function for the rest of the process.
+It preserves installed files and model parameters. A suffix added when graph
+cache keys are built prevents reuse of pre-fix graphs, even after caller config
+contexts exit. The caller's global cache tag stays unchanged.
+Plain imports and eager-only offload do not activate it.
+Known-fixed code is left alone; unknown code is left alone with a warning.
+Verify output parity on unrecognized builds. An upstream fix should eventually
+replace this private-API workaround.
 
 ## Recommended: `compile_fn`
 
@@ -69,16 +88,19 @@ from flextensor.offload_manager import get_offload_manager
 
 config = ft.OffloadConfig(include_patterns=["layers.*"], external_compile=True)
 model = ft.offload(model, config)
+om = get_offload_manager()
 
-for _ in range(get_offload_manager().iters_before_inference):
+for _ in range(om.iters_before_inference):
     model(x)  # discovery + profiling → INFERENCE (eager)
 
-blocks = model.layers
-bump_dynamo_limits_for_compiled_offload(len(blocks))
-for i in range(len(blocks)):
-    blocks[i] = torch.compile(blocks[i], fullgraph=True)
+units = om.offload_units()
+bump_dynamo_limits_for_compiled_offload(len(units))
+for _name, module in units:
+    module.compile(fullgraph=True)  # in-place; do not guess model.layers
 
-om = get_offload_manager()
+for _name, module in om.resident_units():
+    module.compile(fullgraph=True)  # GPU-resident; no replan required
+
 for _ in range(om.request_strategy_replan()):
     model(x)  # warm→measure→replan tail
 ```
@@ -86,6 +108,42 @@ for _ in range(om.request_strategy_replan()):
 Runnable example: `examples/diffusers/compiled-offload/wan_t2v_external_compile.py`.
 
 Prefer `compile_fn` unless your pipeline already owns the compile step.
+
+### Preflight and verify the replan
+
+`request_strategy_replan()` does not raise when replan is unavailable: it logs a
+warning, returns `0`, and serving continues on the eager-profile strategy.
+Pipelines that require the compiled strategy should therefore check availability
+before the request and verify the outcome afterwards. Both properties below are
+passive — reading them never arms or advances the tail:
+
+```python
+if not om.external_compile_active:
+    raise RuntimeError("FlexTensor must use external_compile=True without compile_fn")
+
+if not om.strategy_replan_status.can_request:
+    raise RuntimeError("FlexTensor strategy replan is not available")
+
+for _ in range(om.request_strategy_replan()):
+    model(x)
+
+status = om.strategy_replan_status
+if status.state == "failed" or status.applied is not True:
+    raise RuntimeError("FlexTensor did not apply the new strategy")
+```
+
+`can_request` is `True` only when a request would arm a tail: compiled offload
+active with replan armed, the lifecycle at INFERENCE, no tail in flight or
+`"failed"`, and the source weights still retained. A `"done"` replan that
+refused to rebuild (`applied=False`, for example when no compiled timings were
+captured) can be retried while FlexTensor still holds those weights; a
+successful rebuild consumes them, and a `"failed"` tail is terminal (restart the
+process).
+
+Both `request_strategy_replan()` variants enforce these conditions: when
+`can_request` is `False` they warn and return `0` without disturbing a tail that
+is in flight or already failed. `can_request` is not sufficient for the
+CUDA-graph variant below, which adds requirements it does not cover.
 
 ## CUDA graphs: ``request_strategy_replan(manual_update_state=True)``
 

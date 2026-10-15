@@ -164,7 +164,7 @@ class TestErrorBoundary:
             namespace: str = "test-ns"
             is_creator: bool = False
 
-            def wait_for_ready(self) -> None:
+            def wait_for_ready(self, timeout: float | None = None) -> None:
                 raise RuntimeError("shm timeout")
 
             def read_profile(self):  # type: ignore[return]

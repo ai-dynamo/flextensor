@@ -5,15 +5,22 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping  # noqa: TC003
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
 from torch.overrides import TorchFunctionMode
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from types import TracebackType
+
+    import torch
 
 from flextensor.trap_tensor_mode import _graph_break
 from flextensor.types import GPUMemoryUsage
 
 if TYPE_CHECKING:
     from flextensor.offload_manager import TensorManagerProtocol as _TensorManagerProtocol
+    from flextensor.state_handler import TensorManagerState
 
 
 def format_tensor_id_hint(
@@ -155,31 +162,47 @@ class ProfilingSuspender:
 
 
 class NoOpTrap:
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         _graph_break()
         return self
 
-    def __exit__(self, _type, _value, _traceback):
+    def __exit__(
+        self,
+        _type: type[BaseException] | None,
+        _value: BaseException | None,
+        _traceback: TracebackType | None,
+    ) -> Literal[False]:
         _graph_break()
         return False
 
 
 class EmptyFunctionModeTrap(TorchFunctionMode):
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         _graph_break()
-        return super().__enter__()
+        return cast("Self", super().__enter__())
 
-    def __exit__(self, _type, _value, _traceback):
+    def __exit__(
+        self,
+        _type: type[BaseException] | None,
+        _value: BaseException | None,
+        _traceback: TracebackType | None,
+    ) -> Any:
         _graph_break()
         return super().__exit__(_type, _value, _traceback)
 
-    def __torch_function__(self, func, _types, args, kwargs=None):
+    def __torch_function__(  # type: ignore[override]
+        self,
+        func: Callable[..., Any],
+        _types: Any,
+        args: Any,
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
         return func(*args, **(kwargs or {}))
 
 
@@ -203,35 +226,37 @@ class NoOpTensorManager:
 
     def __init__(
         self,
-        device_gpu,
-        benchmark_cls=None,
-    ):
+        device_gpu: torch.device | str | None,
+        benchmark_cls: Any = None,
+    ) -> None:
         self.device_gpu = device_gpu
         self.benchmark_cls = benchmark_cls
         self.traps_duration_ms = 0
         self.traps_direct_duration_ms = 0
-        self.traps_direct_duration_ms = 0
-        self.traps_direct_stats = {}
-        self.tensor_statistics_map = {}
-        self.tensors_map = {}
-        self.traced_tensors = set()
+        self.traps_direct_stats: dict[str, float] = {}
+        self.tensor_statistics_map: dict[str, Any] = {}
+        self.tensors_map: dict[str, Any] = {}
+        self.traced_tensors: set[Any] = set()
         self.loader_type = ""
+        self.use_shm = False
+        self.load_from_shm = False
         self.shm_namespace: str | None = None
+        self.shm_owner: Any = None
         self.stats: list[Any] = []
 
-    def build_parameters_mapping(self, _model):
+    def build_parameters_mapping(self, _model: Any) -> None:
         pass
 
-    def prepare_warmup_mode(self):
+    def prepare_warmup_mode(self) -> None:
         pass
 
-    def prepare_profile_mode(self):
+    def prepare_profile_mode(self) -> None:
         pass
 
-    def prepare_profile_direct_mode(self):
+    def prepare_profile_direct_mode(self) -> None:
         pass
 
-    def prepare_infer_mode(self):
+    def prepare_infer_mode(self) -> None:
         pass
 
     def prepare_infer_load_mode(self) -> None:
@@ -261,48 +286,54 @@ class NoOpTensorManager:
     def pause_profiling(self) -> Any:
         yield
 
-    def trap(self, _name):
+    def trap(self, _name: str) -> NoOpTrap:
         return NoOpTrap()
 
-    def release_memory(self):
+    def release_memory(self) -> None:
         self.traps_direct_duration_ms = 0
 
     def arm_non_destructive_first_loader(self) -> None:
         pass
 
+    @property
+    def replan_source_weights_available(self) -> bool:
+        # Disabled offload never builds a loader, so there is nothing to replan.
+        return False
+
     def clear_replan_state(self) -> None:
         pass
 
-    def prepare_profile_direct_mode_model(self, model):
+    def prepare_profile_direct_mode_model(self, model: Any) -> Any:
         return model
 
-    def prepare_model(self, model):
+    def prepare_model(self, model: Any) -> Any:
         return model
 
     def prepare_final_model(self, model: Any, *, in_place: bool = False) -> Any:
         return model
 
-    def benchmark_context(self, _iterations: int = 10):
+    def benchmark_context(self, _iterations: int = 10) -> Any:
         return self.benchmark_cls(device_gpu=self.device_gpu)
 
-    def set_model(self, model):
+    def set_model(self, model: Any) -> None:
         self.model = model
 
-    def initialize_warmup(self):
+    def initialize_warmup(self) -> Any:
         return self.model
 
-    def initialize_profile(self):
+    def initialize_profile(self) -> Any:
         return self.model
 
-    def initialize_inference(self):
+    def initialize_inference(self) -> Any:
         return self.model
 
-    def shutdown(self):
-        pass
+    def shutdown(self, *, preserve_model: bool = True) -> None:
+        """No-op when offloading is disabled."""
 
-    def restore_state(self, model: Any, _state: Any) -> None:
+    def restore_state(self, model: Any, _state: Any, *, load_from_shm: bool = False) -> None:
         # Match TensorManager's profile-restore contract: later initialize_* calls
         # return the model associated with the restored state.
+        self.load_from_shm = load_from_shm
         self.model = model
 
     def plan_state_adoption(self, _model: Any, _state: Any) -> Any:
@@ -315,6 +346,9 @@ class NoOpTensorManager:
 
     def restore_adopted_state(self, model: Any, _state: Any) -> None:
         self.model = model
+
+    def export_state(self) -> TensorManagerState:
+        raise RuntimeError("Cannot export state when offloading is disabled")
 
     def save_profile(self, _profile_directory: str) -> None:
         pass

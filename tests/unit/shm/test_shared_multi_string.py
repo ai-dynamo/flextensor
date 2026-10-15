@@ -7,7 +7,7 @@ import os
 from multiprocessing.queues import Queue
 from multiprocessing.synchronize import Event as EventType
 
-from conftest import (
+from shm.multiprocess_utils import (
     EVENT_TIMEOUT,
     assert_clean_exit,
     drain_results,

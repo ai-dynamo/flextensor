@@ -100,7 +100,7 @@ class FlexTensorModelLoader(DefaultModelLoader):
             self.load_config.load_format = self._UNDERLYING_FORMAT
 
         try:
-            return super()._prepare_weights(*args, **kwargs)
+            return super()._prepare_weights(*args, **kwargs)  # type: ignore[no-any-return]  # vllm parent is untyped
         finally:
             self.load_config.load_format = original_format
 
@@ -132,7 +132,7 @@ class FlexTensorModelLoader(DefaultModelLoader):
         logger.info("FlexTensorModelLoader: Phase 2 - Process weights on GPU (if needed)")
         self._process_weights_layer_by_layer(model, model_config, gpu_device, cpu_device, vllm_config)
 
-        return model.eval()
+        return model.eval()  # type: ignore[no-any-return]
 
     def _find_layers_needing_gpu_processing(self, model: nn.Module) -> dict[str, nn.Module]:
         """Find decoder layers containing modules that need GPU weight processing."""
@@ -213,7 +213,7 @@ class FlexTensorModelLoader(DefaultModelLoader):
         except Exception:
             return False
         try:
-            return envs.VLLM_DEEP_GEMM_WARMUP != "skip" and is_deep_gemm_supported()
+            return bool(envs.VLLM_DEEP_GEMM_WARMUP != "skip" and is_deep_gemm_supported())
         except Exception:
             logger.debug(
                 "FlexTensorModelLoader: DeepGEMM support probe failed; disabling warmup",

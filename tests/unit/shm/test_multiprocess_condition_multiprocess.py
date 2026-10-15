@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import posix_ipc
 import pytest
-from conftest import (
+from shm.multiprocess_utils import (
     EVENT_TIMEOUT,
     POLL_INTERVAL,
     assert_clean_exit,
@@ -40,11 +40,8 @@ def wait_for_waiters_registered(
 ) -> None:
     """Block until ``waiter_pids`` have appended their PIDs to the notification list.
 
-    Opens a temporary handle to the existing notification list/lock so the helper
-    can synchronize on observable state instead of a wall clock. Does *not* call
-    ``close_lock()`` because this helper runs in the test parent and is about to
-    return; the parent will exit shortly after, and reclaiming handles eagerly
-    here adds no value.
+    Opens temporary handles to the existing notification list and lock, then
+    closes them after observing the registrations.
     """
     deadline = time.monotonic() + timeout
     condition = MultiprocessCondition(name=name, is_creator=False, lock_class=lock_class)
@@ -59,6 +56,7 @@ def wait_for_waiters_registered(
             time.sleep(POLL_INTERVAL)
     finally:
         condition.close()
+        condition.close_lock()
 
     msg = (
         f"Timed out waiting for waiters to register: expected {sorted(expected_pids)}, "
@@ -244,21 +242,25 @@ def create_condition_process(name, result_queue, lock_class):
         result_queue.put({"success": False, "error": f"{type(e).__name__}: {e}", "action": "create"})
 
 
-def quick_lifecycle_process(name, proc_id, result_queue, lock_class):
-    """Quick lifecycle: creator notifies after a short delay; followers wait then close."""
+def quick_lifecycle_process(name, proc_id, result_queue, lock_class, creator_ready, notify_allowed):
+    """Quick lifecycle: creator notifies after every follower has registered its wait."""
     try:
         if proc_id == 0:
             condition = MultiprocessCondition(name=name, is_creator=True, lock_class=lock_class)
             condition.notification_list.append(f"data_{proc_id}")
-            time.sleep(0.2)
+            creator_ready.set()
+            if not notify_allowed.wait(timeout=EVENT_TIMEOUT):
+                raise TimeoutError("Timed out waiting for follower registrations")
             condition.notify_ready()
             condition.close()
             condition.unlink()
         else:
-            time.sleep(0.1 * proc_id)
+            if not creator_ready.wait(timeout=EVENT_TIMEOUT):
+                raise TimeoutError("Timed out waiting for condition creator")
             condition = MultiprocessCondition(name=name, is_creator=False, lock_class=lock_class)
             condition.wait_for_ready()
             condition.close()
+            condition.close_lock()
 
         result_queue.put({"success": True, "proc_id": proc_id})
     except (posix_ipc.ExistentialError, posix_ipc.BusyError, FileNotFoundError, FileExistsError, OSError) as e:
@@ -535,11 +537,13 @@ class TestMultiprocessConditionMultiprocess:
         """Test that cleanup operations don't cause deadlocks."""
         result_queue = multiprocessing.Queue()
         num_workers = 4
+        creator_ready = multiprocessing.Event()
+        notify_allowed = multiprocessing.Event()
 
         processes = [
             multiprocessing.Process(
                 target=quick_lifecycle_process,
-                args=(self.test_name, i, result_queue, lock_class),
+                args=(self.test_name, i, result_queue, lock_class, creator_ready, notify_allowed),
             )
             for i in range(num_workers)
         ]
@@ -547,6 +551,10 @@ class TestMultiprocessConditionMultiprocess:
         try:
             for proc in processes:
                 proc.start()
+
+            wait_for_event(creator_ready, "condition creator startup", proc=processes[0])
+            wait_for_waiters_registered(self.test_name, [proc.pid for proc in processes[1:]], lock_class)
+            notify_allowed.set()
 
             for i, proc in enumerate(processes):
                 proc.join(timeout=EVENT_TIMEOUT)
@@ -556,6 +564,7 @@ class TestMultiprocessConditionMultiprocess:
             assert all(r["success"] for r in results), f"Failed: {format_failed_results(results)}"
 
         finally:
+            notify_allowed.set()
             for proc in processes:
                 if proc.is_alive():
                     proc.terminate()

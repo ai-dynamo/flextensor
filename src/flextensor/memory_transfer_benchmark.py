@@ -121,9 +121,9 @@ def benchmark_memory_transfers(
         benchmark_tensor_processor.tensors_map.clear()
         del tensor_cpu
         gc.collect()
-        torch._C._host_emptyCache()  # noqa: SLF001
+        torch._C._host_emptyCache()  # type: ignore[attr-defined, unused-ignore]  # noqa: SLF001  # private API, name varies by torch version
 
-    torch._C._host_emptyCache()  # noqa: SLF001
+    torch._C._host_emptyCache()  # type: ignore[attr-defined, unused-ignore]  # noqa: SLF001  # private API, name varies by torch version
     gc.collect()
 
     return memory_transfers

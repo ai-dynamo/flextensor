@@ -29,6 +29,7 @@ See [Internal Phases](../explanation/phases.md) for details on how these compone
         - load_profile
         - load_state
         - restore_state
+        - export_state
         - plan_state_adoption
         - execute_state_adoption
         - restore_adopted_state
@@ -69,3 +70,57 @@ for when to switch modes.
         - NoOpHostPinner
         - is_available
         - make_host_pinner
+
+## Shared Memory
+
+[`SharedOffloadSession`][flextensor.shared_offload.SharedOffloadSession] provides
+coordinated loading from profiles with application-supplied creator and follower
+model factories. See
+[Shared Memory](../explanation/configuration.md#shared-memory-cross-process-weight-sharing)
+for session setup, restoration, and cleanup.
+
+::: flextensor.shared_offload.SharedOffloadSession
+    options:
+      members:
+        - validate_options
+        - namespace_for
+        - offload_from_profile
+        - close
+
+Coordination, shared ownership, and resident tensor storage for cross-process
+weight sharing. See
+[Low-level SHM protocol and ownership](../explanation/configuration.md#low-level-shm-protocol-and-ownership)
+for publication, failure, and lifetime semantics.
+
+::: flextensor.shm.coordinator.ShmCoordinator
+    options:
+      members:
+        - memory_owner
+        - wait_for_ready
+        - notify_ready
+        - mark_failed
+        - close
+
+::: flextensor.shm.coordinator.ShmCoordinatorError
+    options:
+      members: []
+
+::: flextensor.shm.coordinator.ShmCreatorFailedError
+    options:
+      members: []
+
+::: flextensor.shm.coordinator.ShmCreatorDiedError
+    options:
+      members: []
+
+::: flextensor.allocation_block.AllocationManager
+    options:
+      members: []
+
+::: flextensor.shm.tensor_store.SharedTensorStore
+    options:
+      members:
+        - create_from_model
+        - attach
+        - materialize_into
+        - close

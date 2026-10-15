@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# This version provides BreakableCUDAGraphCapture and its capture-completion debug log.
+vllm==0.25.1
+requests~=2.32

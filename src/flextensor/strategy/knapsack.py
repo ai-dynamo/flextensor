@@ -7,7 +7,7 @@ which tensors to offload to CPU memory during inference.
 """
 
 import warnings
-from typing import ClassVar
+from typing import Any, ClassVar, cast
 
 import numpy
 
@@ -292,8 +292,8 @@ def _compute_solution_block(  # noqa: C901
         return [layer_tensors[i] for i in range(n) if greedy_best[i] == 1.0]
 
     # --- Objective: minimize negative packed size, penalty for over-capacity ---
-    def objective(x):
-        weight = np.dot(x, sizes)
+    def objective(x: np.ndarray) -> float:
+        weight = cast("float", np.dot(x, sizes))
         if weight > cap:
             return (weight - cap) / max(cap, 1.0)
         return -weight / max(cap, 1.0)
@@ -306,18 +306,17 @@ def _compute_solution_block(  # noqa: C901
     for _ in range(pop_target - 2):
         init_pop.append(rng.integers(0, 2, size=n).astype(float))
     init_pop_arr = np.array(init_pop)
-
     # --- Run optimizer with early stopping ---
     result = differential_evolution(
         objective,
-        bounds=[(0, 1)] * n,
+        bounds=cast("Any", [(0, 1)] * n),
         integrality=[True] * n,
         init=init_pop_arr,
         maxiter=200,
         tol=0.01,
         seed=42,
         polish=False,
-        callback=EarlyStopCallback(max_stall=25, objective_func=objective),
+        callback=cast("Any", EarlyStopCallback(max_stall=25, objective_func=objective)),
     )
 
     if np.any(np.isnan(result.x)):
@@ -421,11 +420,11 @@ def _compute_solution(
         return [layer_tensors[i] for i in range(n) if greedy_best[i] == 1.0]
 
     # --- Objective ---
-    def objective(x):
-        current_weight = np.dot(x, weights_arr)
+    def objective(x: np.ndarray) -> float:
+        current_weight = cast("float", np.dot(x, weights_arr))
         if current_weight > cap:
             return (current_weight - cap) / max(cap, 1.0)
-        return -np.dot(x, profits_arr) / max(float(np.sum(profits_arr)), 1.0)
+        return -cast("float", np.dot(x, profits_arr)) / max(float(np.sum(profits_arr)), 1.0)
 
     # --- Build initial population seeded with greedy solutions ---
     pop_target = max(6, min(20, 250 // n))
@@ -435,18 +434,17 @@ def _compute_solution(
     for _ in range(pop_target - 3):
         init_pop.append(rng.integers(0, 2, size=n).astype(float))
     init_pop_arr = np.array(init_pop)
-
     # --- Run optimizer with early stopping ---
     result = differential_evolution(
         objective,
-        bounds=[(0, 1)] * n,
+        bounds=cast("Any", [(0, 1)] * n),
         integrality=[True] * n,
         init=init_pop_arr,
         maxiter=200,
         tol=0.01,
         seed=42,
         polish=False,
-        callback=EarlyStopCallback(max_stall=25, objective_func=objective),
+        callback=cast("Any", EarlyStopCallback(max_stall=25, objective_func=objective)),
     )
 
     if np.any(np.isnan(result.x)):

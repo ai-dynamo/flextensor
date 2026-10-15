@@ -113,7 +113,30 @@ def enable_offline_if_cached(model_name: str) -> None:
     Each metadata file and every indexed model-weight shard must resolve to a
     cached path; otherwise online mode stays on so the download can finish.
     """
-    from huggingface_hub import try_to_load_from_cache
+    from huggingface_hub import snapshot_download, try_to_load_from_cache
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    try:
+        from huggingface_hub._snapshot_download import read_tree_cache
+    except ImportError:
+        read_tree_cache = None
+
+    try:
+        snapshot_path = Path(snapshot_download(model_name, local_files_only=True))
+    except LocalEntryNotFoundError:
+        os.environ.pop("HF_HUB_OFFLINE", None)
+        os.environ.pop("TRANSFORMERS_OFFLINE", None)
+        print(f"[HF cache] {model_name} not fully cached (incomplete snapshot) — HF API calls enabled")
+        return
+
+    tree_entries = (
+        None if read_tree_cache is None else read_tree_cache(str(snapshot_path.parent.parent), snapshot_path.name)
+    )
+    if tree_entries is None:
+        os.environ.pop("HF_HUB_OFFLINE", None)
+        os.environ.pop("TRANSFORMERS_OFFLINE", None)
+        print(f"[HF cache] {model_name} cannot verify snapshot completeness — HF API calls enabled")
+        return
 
     missing = [name for name in _REQUIRED_CACHE_FILES if not isinstance(try_to_load_from_cache(model_name, name), str)]
     if not missing and not _model_weights_are_cached(model_name, try_to_load_from_cache):

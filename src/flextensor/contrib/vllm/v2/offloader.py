@@ -95,7 +95,7 @@ def _storage_aliases_by_key(
     module: nn.Module,
     storage_keys: set[StageStorageKey],
 ) -> dict[StageStorageKey, list[torch.Tensor]]:
-    aliases_by_storage = {storage_key: [] for storage_key in storage_keys}
+    aliases_by_storage: dict[StageStorageKey, list[torch.Tensor]] = {storage_key: [] for storage_key in storage_keys}
     for tensor in compute_reachable_tensor_map(module).values():
         if tensor.is_meta or tensor.layout != torch.strided:
             continue
@@ -346,6 +346,26 @@ class VllmBootstrapOffloader(_VllmBaseOffloader):
             elif proxy is not None:
                 flextensor.release()
             raise
+
+    def bind_shared_runtime(self, proxy: nn.Module) -> None:
+        """Adopt the runtime manager initialized by a shared offload session."""
+        if self._runtime_manager is not None:
+            raise VllmFlexTensorV2Error("runtime takeover already completed")
+        self.post_init()
+        manager = getattr(proxy, "offload_manager", None)
+        if not isinstance(manager, OffloadManager):
+            raise VllmFlexTensorV2Error("shared offload proxy did not expose an OffloadManager")
+
+        state = manager._export_runtime_state()  # noqa: SLF001 - shared-session runtime adoption boundary.
+        self._runtime_manager = manager
+        self._runtime_state = state
+        self._state_built = True
+        self._live_units.clear()
+        self._staged_parameter_ids.clear()
+        self._staged_storages.clear()
+        self._staged_storage_sources.clear()
+        self._pending_deferred_callbacks.clear()
+        LOGGER.info("FlexTensor vLLM integration v2 state takeover installed loader_type=%s", state.loader_type)
 
     @property
     def runtime_state(self) -> TensorManagerState:

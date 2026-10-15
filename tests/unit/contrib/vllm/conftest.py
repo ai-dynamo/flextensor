@@ -213,6 +213,7 @@ def worker_module(monkeypatch):  # noqa: C901
     }
     module_names = (
         "flextensor.contrib.vllm.v2.worker",
+        "flextensor.contrib.vllm.v2.breakable_cudagraph",
         "flextensor.contrib.vllm.v2.offloader",
         "flextensor.contrib.vllm.v2.inference_profile",
         "flextensor.contrib.vllm.v2.state_builder",

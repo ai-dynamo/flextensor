@@ -16,6 +16,8 @@ rather than constructing one directly.
         - offload
         - offload_from_state
         - offload_block
+        - offload_units
+        - resident_units
         - get_gpu_memory_usage
         - save_profile
         - load_profile
@@ -26,6 +28,8 @@ rather than constructing one directly.
         - collect_offload_timing
         - reset_offload_timing
         - update_offload_timing
+        - external_compile_active
+        - strategy_replan_status
         - request_strategy_replan
         - update_state
         - release
