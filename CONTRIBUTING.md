@@ -105,13 +105,19 @@ Ready to contribute? Here's how to set up the `NVIDIA FlexTensor` for local deve
 $ git clone git@github.com:your_name_here/flextensor.git
 ```
 
-3. Install your local copy into a virtualenv. Assuming you have virtualenvwrapper installed, this is how you set up your fork for local development:
+3. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and use
+   Python 3.11 or newer to create an isolated development environment:
 
 ```shell
-$ mkvirtualenv flextensor
 $ cd flextensor/
+$ uv venv .venv
+$ source .venv/bin/activate
 $ make install-dev
+$ pre-commit install
 ```
+
+`make install-dev` installs the editable package and the `dev` dependency group,
+including the test tools and pre-commit. The project requires uv 0.6.7 or newer.
 
 4. Create a branch for local development:
 
@@ -121,14 +127,33 @@ $ git checkout -b name-of-your-bugfix-or-feature
 
 Now you can make your changes locally.
 
-5. When you're done making changes, check that your changes pass linters and the
-   tests, including testing other Python versions with tox:
+5. Run the configured pre-commit checks, type checker and import checks:
 
 ```shell
-$ make lint  # will run i.a. flake8 and pytype linters
-$ make test  # will run a test with on your current virtualenv
-$ make test-fw  # will run a framework test inside framework container
+$ pre-commit run --all-files
+$ make mypy
+$ make lint-imports
 ```
+
+The pre-commit configuration includes Ruff linting and formatting. Run the unit
+tests separately; these do not require a GPU:
+
+```shell
+$ make test-unit
+```
+
+For changes that need GPU or framework validation, run the relevant integration
+tests on compatible CUDA hardware with enough GPU and host memory:
+
+```shell
+$ make test-integration TEST_LEVEL=L0
+```
+
+`TEST_LEVEL` selects integration test directories (`L0` by default; `L1` and `L2`
+are also available). The target creates a virtual environment for each selected
+test and installs its `requirements.txt` together with the project's test
+dependencies. Review the selected test's requirements and script before running
+it. `make test` runs both integration tests and unit tests.
 
 6. Commit your changes and push your branch to GitHub:
 
