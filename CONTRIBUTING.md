@@ -149,8 +149,8 @@ tests on compatible CUDA hardware with enough GPU and host memory:
 $ make test-integration TEST_LEVEL=L0
 ```
 
-`TEST_LEVEL` selects integration test directories (`L0` by default; `L1` and `L2`
-are also available). The target creates a virtual environment for each selected
+`TEST_LEVEL` selects integration test directories (`L0` by default; `L1` is also
+available). The target creates a virtual environment for each selected
 test and installs its `requirements.txt` together with the project's test
 dependencies. Review the selected test's requirements and script before running
 it. `make test` runs both integration tests and unit tests.
