@@ -1,0 +1,2947 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Tensor offloading and management library for PyTorch">
+      
+      
+      
+        <link rel="canonical" href="https://ai-dynamo.github.io/flextensor/latest/how-to/troubleshooting/">
+      
+      
+        <link rel="prev" href="../../explanation/tensor-discovery/">
+      
+      
+        <link rel="next" href="../configure-for-common-scenarios/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Troubleshooting - FlexTensor Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#how-to-troubleshoot-flextensor" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="FlexTensor Documentation" class="md-header__button md-logo" aria-label="FlexTensor Documentation" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            FlexTensor Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Troubleshooting
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ai-dynamo/flextensor" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    flextensor
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  Get Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../explanation/configuration/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Understand
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../api/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="https://github.com/ai-dynamo/flextensor" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Dashboard
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="FlexTensor Documentation" class="md-nav__button md-logo" aria-label="FlexTensor Documentation" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    FlexTensor Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ai-dynamo/flextensor" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    flextensor
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get Started
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quick-start/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Understand
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Understand
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/pattern-matching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pattern Matching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/phases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internal Phases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/tensor-discovery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tensor Discovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#debug-component-initialization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debug Component Initialization
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Debug Component Initialization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-to-use-this-approach" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to Use This Approach
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Steps
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Steps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-enable-instrumentation-in-your-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Enable Instrumentation in Your Config
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-run-your-model-through-discovery-and-profiling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Run Your Model Through Discovery and Profiling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-locate-the-output-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Locate the Output File
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-interpret-the-captured-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Interpret the Captured Data
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#advanced-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced Options
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Advanced Options">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#manual-dump" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Dump
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-output-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom Output Directory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#disable-instrumentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disable Instrumentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resolve-gpu-out-of-memory-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resolve GPU Out-of-Memory Errors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Resolve GPU Out-of-Memory Errors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-this-happens" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why this happens
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-1-check-for-competing-gpu-processes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: Check for competing GPU processes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-narrow-the-include-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: Narrow the include patterns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-reduce-the-number-of-memory-blocks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: Reduce the number of memory blocks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-4-check-for-insufficient-free-gpu-memory-error" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4: Check for "Insufficient free GPU memory" error
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resolve-host-out-of-memory-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resolve Host Out-of-Memory Errors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Resolve Host Out-of-Memory Errors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-this-happens_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why this happens
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-1-check-host-memory-pressure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: Check host memory pressure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-narrow-the-include-patterns_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: Narrow the include patterns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-switch-to-in-place-pinning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: Switch to in-place pinning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-4-disable-pinned-memory-as-a-last-resort" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4: Disable pinned memory as a last resort
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fix-cuda-device-mismatch-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fix CUDA Device Mismatch Errors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fix CUDA Device Mismatch Errors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-verify-tensor-discovery-is-enabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: Verify tensor discovery is enabled
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-use-the-offload-api-with-forward-patching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: Use the offload() API with forward patching
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-debug-with-instrumentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: Debug with instrumentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagnose-high-performance-overhead" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnose High Performance Overhead
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Diagnose High Performance Overhead">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-check-that-inference-phase-has-been-reached" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: Check that inference phase has been reached
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-increase-profile-iterations-for-noisy-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: Increase profile iterations for noisy environments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-tune-transfer-mode-and-block-count" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: Tune transfer mode and block count
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-to-expect-higher-overhead" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to expect higher overhead
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fix-unexpected-behavior-after-modifying-a-patched-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fix Unexpected Behavior After Modifying a Patched Model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fix Unexpected Behavior After Modifying a Patched Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-this-happens_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why This Happens
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#solution-release-and-re-apply-offloading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Solution: Release and Re-apply Offloading
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prevention" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prevention
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fix-cross-thread-manager-access-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fix Cross-Thread Manager Access Errors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fix Cross-Thread Manager Access Errors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-identify-the-conflicting-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: Identify the conflicting access
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-use-a-separate-name-model-and-thread-per-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: Use a separate name, model, and thread per manager
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-restructure-to-single-thread-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: Restructure to single-thread access
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#collect-gpu-memory-snapshots-in-vllm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Collect GPU Memory Snapshots in vLLM
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Collect GPU Memory Snapshots in vLLM">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#choose-the-right-worker-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choose the Right Worker Class
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#steps_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Steps
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Steps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-set-the-output-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Set the output directory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-start-vllm-with-the-snapshot-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Start vLLM with the snapshot worker
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-inspect-the-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Inspect the output
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configure-for-common-scenarios/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configure for Common Scenarios
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../exclude-patterns/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exclude Patterns
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../torch-compile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    torch.compile
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../api/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/simplified/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simplified API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/offload-manager/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OffloadManager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/strategies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Strategies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/advanced/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Advanced
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/ai-dynamo/flextensor" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#debug-component-initialization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debug Component Initialization
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Debug Component Initialization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-to-use-this-approach" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to Use This Approach
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Steps
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Steps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-enable-instrumentation-in-your-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Enable Instrumentation in Your Config
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-run-your-model-through-discovery-and-profiling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Run Your Model Through Discovery and Profiling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-locate-the-output-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Locate the Output File
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-interpret-the-captured-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Interpret the Captured Data
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#advanced-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced Options
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Advanced Options">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#manual-dump" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Dump
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-output-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom Output Directory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#disable-instrumentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disable Instrumentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resolve-gpu-out-of-memory-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resolve GPU Out-of-Memory Errors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Resolve GPU Out-of-Memory Errors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-this-happens" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why this happens
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-1-check-for-competing-gpu-processes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: Check for competing GPU processes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-narrow-the-include-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: Narrow the include patterns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-reduce-the-number-of-memory-blocks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: Reduce the number of memory blocks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-4-check-for-insufficient-free-gpu-memory-error" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4: Check for "Insufficient free GPU memory" error
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resolve-host-out-of-memory-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resolve Host Out-of-Memory Errors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Resolve Host Out-of-Memory Errors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-this-happens_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why this happens
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-1-check-host-memory-pressure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: Check host memory pressure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-narrow-the-include-patterns_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: Narrow the include patterns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-switch-to-in-place-pinning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: Switch to in-place pinning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-4-disable-pinned-memory-as-a-last-resort" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4: Disable pinned memory as a last resort
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fix-cuda-device-mismatch-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fix CUDA Device Mismatch Errors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fix CUDA Device Mismatch Errors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-verify-tensor-discovery-is-enabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: Verify tensor discovery is enabled
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-use-the-offload-api-with-forward-patching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: Use the offload() API with forward patching
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-debug-with-instrumentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: Debug with instrumentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagnose-high-performance-overhead" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnose High Performance Overhead
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Diagnose High Performance Overhead">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-check-that-inference-phase-has-been-reached" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: Check that inference phase has been reached
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-increase-profile-iterations-for-noisy-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: Increase profile iterations for noisy environments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-tune-transfer-mode-and-block-count" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: Tune transfer mode and block count
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-to-expect-higher-overhead" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to expect higher overhead
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fix-unexpected-behavior-after-modifying-a-patched-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fix Unexpected Behavior After Modifying a Patched Model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fix Unexpected Behavior After Modifying a Patched Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-this-happens_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why This Happens
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#solution-release-and-re-apply-offloading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Solution: Release and Re-apply Offloading
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prevention" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prevention
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fix-cross-thread-manager-access-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fix Cross-Thread Manager Access Errors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fix Cross-Thread Manager Access Errors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-identify-the-conflicting-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: Identify the conflicting access
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-use-a-separate-name-model-and-thread-per-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: Use a separate name, model, and thread per manager
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-restructure-to-single-thread-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: Restructure to single-thread access
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#collect-gpu-memory-snapshots-in-vllm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Collect GPU Memory Snapshots in vLLM
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Collect GPU Memory Snapshots in vLLM">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#choose-the-right-worker-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choose the Right Worker Class
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#steps_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Steps
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Steps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-set-the-output-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Set the output directory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-start-vllm-with-the-snapshot-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Start vLLM with the snapshot worker
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-inspect-the-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Inspect the output
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<!--
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+-->
+<h1 id="how-to-troubleshoot-flextensor">How to Troubleshoot FlexTensor<a class="headerlink" href="#how-to-troubleshoot-flextensor" title="Permanent link">&para;</a></h1>
+<p>This guide provides practical solutions to common problems you may encounter when using FlexTensor. Each section focuses on a specific troubleshooting scenario with step-by-step instructions to diagnose and resolve issues.</p>
+<p><strong>When to use this guide</strong>: You're experiencing unexpected behavior, errors, or need to inspect FlexTensor's internal operations for debugging.</p>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<ul>
+<li>FlexTensor installed</li>
+<li>A model configured for offloading</li>
+<li>Basic familiarity with FlexTensor's configuration (see <a href="../../quick-start/">Quick Start</a>)</li>
+</ul>
+<hr />
+<h2 id="debug-component-initialization">Debug Component Initialization<a class="headerlink" href="#debug-component-initialization" title="Permanent link">&para;</a></h2>
+<p><strong>Problem</strong>: You need to understand what configuration values FlexTensor is using internally, verify that components are initialized correctly, or debug unexpected behavior during offloading setup.</p>
+<p><strong>Solution</strong>: Use FlexTensor's instrumentation system to capture all initialization arguments and configuration values used by internal components.</p>
+<h3 id="when-to-use-this-approach">When to Use This Approach<a class="headerlink" href="#when-to-use-this-approach" title="Permanent link">&para;</a></h3>
+<p>Use instrumentation debugging when:
+- Component initialization fails with unclear error messages
+- You suspect configuration values aren't being applied correctly
+- You need to verify which strategy or loader is being used
+- You're reporting a bug and need detailed diagnostic information</p>
+<h3 id="steps">Steps<a class="headerlink" href="#steps" title="Permanent link">&para;</a></h3>
+<h4 id="1-enable-instrumentation-in-your-config">1. Enable Instrumentation in Your Config<a class="headerlink" href="#1-enable-instrumentation-in-your-config" title="Permanent link">&para;</a></h4>
+<p>Set <code>enable_instrumentation=True</code> in your <code>OffloadConfig</code>:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">flextensor</span><span class="w"> </span><span class="kn">import</span> <span class="n">OffloadConfig</span><span class="p">,</span> <span class="n">offload</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">config</span> <span class="o">=</span> <span class="n">OffloadConfig</span><span class="p">(</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">enable_instrumentation</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">include_patterns</span><span class="o">=</span><span class="p">[</span><span class="s2">"layers.*"</span><span class="p">],</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="c1"># ... your other settings</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="n">model</span> <span class="o">=</span> <span class="n">offload</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">)</span>
+</span></code></pre></div>
+<p><strong>Alternative: Use environment variables</strong></p>
+<p>You can also enable instrumentation via environment variables without modifying code:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">FT_ENABLE_INSTRUMENTATION</span><span class="o">=</span><span class="m">1</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">FT_INSTRUMENTATION_OUTPUT_DIR</span><span class="o">=</span>/tmp/my_debug_output<span class="w">  </span><span class="c1"># optional</span>
+</span></code></pre></div>
+<p>Then load the config from environment:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">flextensor</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_config</span><span class="p">,</span> <span class="n">offload</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">config</span> <span class="o">=</span> <span class="n">load_config</span><span class="p">()</span>  <span class="c1"># reads FT_* environment variables</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">model</span> <span class="o">=</span> <span class="n">offload</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">)</span>
+</span></code></pre></div>
+<h4 id="2-run-your-model-through-discovery-and-profiling">2. Run Your Model Through Discovery and Profiling<a class="headerlink" href="#2-run-your-model-through-discovery-and-profiling" title="Permanent link">&para;</a></h4>
+<p>Execute your model for the configured number of discovery and profiling iterations:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">discovery_iters</span> <span class="o">+</span> <span class="n">config</span><span class="o">.</span><span class="n">profiling_iters</span><span class="p">):</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">output</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">input_data</span><span class="p">)</span>
+</span></code></pre></div>
+<p>When FlexTensor transitions to <abbr title="Third active phase — applies the computed offloading strategy for production execution. No timing collection.">inference phase</abbr>, it automatically dumps the instrumentation data.</p>
+<h4 id="3-locate-the-output-file">3. Locate the Output File<a class="headerlink" href="#3-locate-the-output-file" title="Permanent link">&para;</a></h4>
+<p>The instrumentation data is written to the <code>instrumentation_output_dir</code> directory (default: <code>.flextensor/instrumentation</code>). The file structure is:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>.flextensor/
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>└── instrumentation/
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    └── 20251209_143052/
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>        └──── components.20251209_143052_pid12345.json
+</span></code></pre></div>
+<p>Each run creates a timestamped subdirectory with the JSON file inside.</p>
+<h4 id="4-interpret-the-captured-data">4. Interpret the Captured Data<a class="headerlink" href="#4-interpret-the-captured-data" title="Permanent link">&para;</a></h4>
+<p>The JSON file contains:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p">{</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">"timestamp"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2025-12-09T14:30:52.123456"</span><span class="p">,</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nt">"flextensor_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"0.1.0"</span><span class="p">,</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="nt">"host_memory"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">    </span><span class="nt">"host_memory_total"</span><span class="p">:</span><span class="w"> </span><span class="mi">270122237952</span><span class="p">,</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">    </span><span class="nt">"host_memory_used"</span><span class="p">:</span><span class="w"> </span><span class="mi">13204619264</span><span class="p">,</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">    </span><span class="nt">"host_memory_available"</span><span class="p">:</span><span class="w"> </span><span class="mi">256917618688</span><span class="p">,</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">    </span><span class="nt">"swap_total"</span><span class="p">:</span><span class="w"> </span><span class="mi">8589934592</span><span class="p">,</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">    </span><span class="nt">"swap_used"</span><span class="p">:</span><span class="w"> </span><span class="mi">107374182</span><span class="p">,</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">    </span><span class="nt">"swap_free"</span><span class="p">:</span><span class="w"> </span><span class="mi">8482560410</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">  </span><span class="p">},</span>
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">  </span><span class="nt">"components"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">    </span><span class="p">{</span>
+</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">      </span><span class="nt">"class_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"KnapsackStrategy"</span><span class="p">,</span>
+</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="w">      </span><span class="nt">"module_path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"flextensor.strategy.KnapsackStrategy"</span><span class="p">,</span>
+</span><span id="__span-5-16"><a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="w">      </span><span class="nt">"init_timestamp"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2025-12-09T14:30:50.100000"</span><span class="p">,</span>
+</span><span id="__span-5-17"><a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="w">      </span><span class="nt">"args"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-5-18"><a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="w">        </span><span class="nt">"scale"</span><span class="p">:</span><span class="w"> </span><span class="mf">1.0</span><span class="p">,</span>
+</span><span id="__span-5-19"><a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="w">        </span><span class="nt">"cyclic"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+</span><span id="__span-5-20"><a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a><span class="w">        </span><span class="nt">"group_size"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+</span><span id="__span-5-21"><a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a><span class="w">        </span><span class="nt">"threshold_mb"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.1</span>
+</span><span id="__span-5-22"><a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a><span class="w">      </span><span class="p">}</span>
+</span><span id="__span-5-23"><a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a><span class="w">    </span><span class="p">},</span>
+</span><span id="__span-5-24"><a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a><span class="w">    </span><span class="p">{</span>
+</span><span id="__span-5-25"><a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a><span class="w">      </span><span class="nt">"class_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"TensorManager"</span><span class="p">,</span>
+</span><span id="__span-5-26"><a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a><span class="w">      </span><span class="nt">"module_path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"flextensor.tensor_manager.TensorManager"</span><span class="p">,</span>
+</span><span id="__span-5-27"><a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a><span class="w">      </span><span class="nt">"init_timestamp"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2025-12-09T14:30:50.200000"</span><span class="p">,</span>
+</span><span id="__span-5-28"><a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a><span class="w">      </span><span class="nt">"args"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-5-29"><a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a><span class="w">        </span><span class="nt">"device_gpu"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cuda:0"</span><span class="p">,</span>
+</span><span id="__span-5-30"><a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a><span class="w">        </span><span class="nt">"tensor_manager_load_strategy"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-5-31"><a id="__codelineno-5-31" name="__codelineno-5-31" href="#__codelineno-5-31"></a><span class="w">          </span><span class="nt">"_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"AdaptiveStrategy"</span><span class="p">,</span>
+</span><span id="__span-5-32"><a id="__codelineno-5-32" name="__codelineno-5-32" href="#__codelineno-5-32"></a><span class="w">          </span><span class="nt">"_module"</span><span class="p">:</span><span class="w"> </span><span class="s2">"flextensor.strategy"</span>
+</span><span id="__span-5-33"><a id="__codelineno-5-33" name="__codelineno-5-33" href="#__codelineno-5-33"></a><span class="w">        </span><span class="p">},</span>
+</span><span id="__span-5-34"><a id="__codelineno-5-34" name="__codelineno-5-34" href="#__codelineno-5-34"></a><span class="w">        </span><span class="nt">"pinned_memory"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+</span><span id="__span-5-35"><a id="__codelineno-5-35" name="__codelineno-5-35" href="#__codelineno-5-35"></a><span class="w">        </span><span class="nt">"pinned_memory_mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"torch"</span><span class="p">,</span>
+</span><span id="__span-5-36"><a id="__codelineno-5-36" name="__codelineno-5-36" href="#__codelineno-5-36"></a><span class="w">        </span><span class="nt">"loader_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"allocation_block_transfer"</span><span class="p">,</span>
+</span><span id="__span-5-37"><a id="__codelineno-5-37" name="__codelineno-5-37" href="#__codelineno-5-37"></a><span class="w">        </span><span class="nt">"remove_layers_operations"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+</span><span id="__span-5-38"><a id="__codelineno-5-38" name="__codelineno-5-38" href="#__codelineno-5-38"></a><span class="w">        </span><span class="nt">"blocks"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span>
+</span><span id="__span-5-39"><a id="__codelineno-5-39" name="__codelineno-5-39" href="#__codelineno-5-39"></a><span class="w">        </span><span class="nt">"move_top_level_buffers_to_gpu"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+</span><span id="__span-5-40"><a id="__codelineno-5-40" name="__codelineno-5-40" href="#__codelineno-5-40"></a><span class="w">        </span><span class="nt">"use_shm"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+</span><span id="__span-5-41"><a id="__codelineno-5-41" name="__codelineno-5-41" href="#__codelineno-5-41"></a><span class="w">        </span><span class="nt">"enable_diagnostics"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+</span><span id="__span-5-42"><a id="__codelineno-5-42" name="__codelineno-5-42" href="#__codelineno-5-42"></a><span class="w">        </span><span class="nt">"max_gpu_mem_fraction"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+</span><span id="__span-5-43"><a id="__codelineno-5-43" name="__codelineno-5-43" href="#__codelineno-5-43"></a><span class="w">        </span><span class="nt">"_direct_mode"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+</span><span id="__span-5-44"><a id="__codelineno-5-44" name="__codelineno-5-44" href="#__codelineno-5-44"></a><span class="w">        </span><span class="nt">"_use_trace_tensor"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+</span><span id="__span-5-45"><a id="__codelineno-5-45" name="__codelineno-5-45" href="#__codelineno-5-45"></a><span class="w">        </span><span class="nt">"_rearrange_transfers"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+</span><span id="__span-5-46"><a id="__codelineno-5-46" name="__codelineno-5-46" href="#__codelineno-5-46"></a><span class="w">        </span><span class="nt">"_compute_transfer_gap"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+</span><span id="__span-5-47"><a id="__codelineno-5-47" name="__codelineno-5-47" href="#__codelineno-5-47"></a><span class="w">        </span><span class="nt">"_enable_untraced_tensor_discovery"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+</span><span id="__span-5-48"><a id="__codelineno-5-48" name="__codelineno-5-48" href="#__codelineno-5-48"></a><span class="w">      </span><span class="p">}</span>
+</span><span id="__span-5-49"><a id="__codelineno-5-49" name="__codelineno-5-49" href="#__codelineno-5-49"></a><span class="w">    </span><span class="p">}</span>
+</span><span id="__span-5-50"><a id="__codelineno-5-50" name="__codelineno-5-50" href="#__codelineno-5-50"></a><span class="w">  </span><span class="p">],</span>
+</span><span id="__span-5-51"><a id="__codelineno-5-51" name="__codelineno-5-51" href="#__codelineno-5-51"></a><span class="w">  </span><span class="nt">"memory_transfer_stats"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-5-52"><a id="__codelineno-5-52" name="__codelineno-5-52" href="#__codelineno-5-52"></a><span class="w">    </span><span class="nt">"1024"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.015</span><span class="p">,</span>
+</span><span id="__span-5-53"><a id="__codelineno-5-53" name="__codelineno-5-53" href="#__codelineno-5-53"></a><span class="w">    </span><span class="nt">"4096"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.023</span><span class="p">,</span>
+</span><span id="__span-5-54"><a id="__codelineno-5-54" name="__codelineno-5-54" href="#__codelineno-5-54"></a><span class="w">    </span><span class="nt">"1048576"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.187</span>
+</span><span id="__span-5-55"><a id="__codelineno-5-55" name="__codelineno-5-55" href="#__codelineno-5-55"></a><span class="w">  </span><span class="p">}</span>
+</span><span id="__span-5-56"><a id="__codelineno-5-56" name="__codelineno-5-56" href="#__codelineno-5-56"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>Each component record includes:
+- <code>class_name</code>: The component class
+- <code>module_path</code>: Full module path
+- <code>init_timestamp</code>: When the component was initialized
+- <code>args</code>: All initialization arguments <strong>and their default values</strong>. The decorator captures every parameter, including those not explicitly passed by the caller.</p>
+<blockquote>
+<p><strong>Note:</strong> Fields prefixed with <code>_</code> (e.g. <code>_direct_mode</code>, <code>_use_trace_tensor</code>) are internal debug parameters. Their presence in instrumentation output is expected. In normal operation they remain at their defaults (<code>true</code> and <code>false</code> respectively). The exact set of fields may vary across components and versions.</p>
+</blockquote>
+<p>The <code>host_memory</code> object captures a point-in-time snapshot of host physical memory (<code>host_memory_*</code>) and swap space (<code>swap_*</code>) at the time the dump is written. All values are in bytes. Divide by <code>1024 ** 3</code> to convert to GiB.</p>
+<p>The <code>memory_transfer_stats</code> object maps <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> sizes (bytes) to GPU↔CPU transfer times (ms), as measured during profiling. This key is present when the dump is written at inference transition (the automatic path); it may be absent in manual dumps.</p>
+<h3 id="advanced-options">Advanced Options<a class="headerlink" href="#advanced-options" title="Permanent link">&para;</a></h3>
+<h4 id="manual-dump">Manual Dump<a class="headerlink" href="#manual-dump" title="Permanent link">&para;</a></h4>
+<p>To dump instrumentation data at any point (not just at inference transition):</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">flextensor.instrumentation</span><span class="w"> </span><span class="kn">import</span> <span class="n">dump_instrumentation</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">dump_instrumentation</span><span class="p">(</span><span class="s2">"/path/to/dir"</span><span class="p">)</span>
+</span></code></pre></div>
+<h4 id="custom-output-directory">Custom Output Directory<a class="headerlink" href="#custom-output-directory" title="Permanent link">&para;</a></h4>
+<p>Change the output location via config:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">OffloadConfig</span><span class="p">(</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="n">enable_instrumentation</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    <span class="n">instrumentation_output_dir</span><span class="o">=</span><span class="s2">"/tmp/my_debug_output"</span><span class="p">,</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="p">)</span>
+</span></code></pre></div>
+<h4 id="disable-instrumentation">Disable Instrumentation<a class="headerlink" href="#disable-instrumentation" title="Permanent link">&para;</a></h4>
+<p>For production, ensure instrumentation is disabled (the default):</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">OffloadConfig</span><span class="p">(</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="n">enable_instrumentation</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>  <span class="c1"># default</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="p">)</span>
+</span></code></pre></div>
+<p>Or simply omit the <code>enable_instrumentation</code> parameter.</p>
+<hr />
+<h2 id="resolve-gpu-out-of-memory-errors">Resolve GPU Out-of-Memory Errors<a class="headerlink" href="#resolve-gpu-out-of-memory-errors" title="Permanent link">&para;</a></h2>
+<p><strong>Problem</strong>: <code>torch.cuda.OutOfMemoryError</code> or <code>CUDA out of memory</code> during discovery, profiling, or inference.</p>
+<h3 id="why-this-happens">Why this happens<a class="headerlink" href="#why-this-happens" title="Permanent link">&para;</a></h3>
+<p>FlexTensor pre-allocates GPU memory blocks sized to the largest trapped module's weights. With <code>include_patterns=["*"]</code>, container modules (e.g., the top-level <code>model</code> or a <code>Sequential</code>) are also trapped — their traps see all child weights, inflating block sizes.</p>
+<h3 id="step-1-check-for-competing-gpu-processes">Step 1: Check for competing GPU processes<a class="headerlink" href="#step-1-check-for-competing-gpu-processes" title="Permanent link">&para;</a></h3>
+<p>Verify that no other processes are holding GPU memory:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>nvidia-smi
+</span></code></pre></div>
+<p>If another process is consuming significant memory, stop it or move your workload to a free device.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Setting <code>max_gpu_mem_fraction</code> does not fully eliminate this risk. The budget is capped to available memory at the time the strategy is computed, but a competing process can allocate GPU memory between that query and the actual block allocations, causing an OOM.</p>
+</div>
+<h3 id="step-2-narrow-the-include-patterns">Step 2: Narrow the include patterns<a class="headerlink" href="#step-2-narrow-the-include-patterns" title="Permanent link">&para;</a></h3>
+<p>If <code>include_patterns=["*"]</code> is offloading embedding or output layers that need to stay on GPU, or container modules are inflating block sizes, narrow the scope. For example, with a decoder-only model in vLLM, these patterns target each transformer layer and special modules while leaving the rest unaffected:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">OffloadConfig</span><span class="p">(</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    <span class="n">include_patterns</span><span class="o">=</span><span class="p">[</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>        <span class="s2">"model.embed_tokens"</span><span class="p">,</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>        <span class="s2">"model.layers.*"</span><span class="p">,</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>        <span class="s2">"model.norm"</span><span class="p">,</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>        <span class="s2">"lm_head"</span><span class="p">,</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>    <span class="p">],</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="p">)</span>
+</span></code></pre></div>
+<p><strong>Why this helps:</strong> Offloaded layers are distributed across <code>num_blocks</code> GPU memory blocks, each sized to the largest layer assigned to it. With <code>["*"]</code>, container modules become the "largest layer" and inflate every <abbr title="A pre-allocated GPU memory region used by block-based transfer modes for pipelined CPU-to-GPU copies.">memory block</abbr> to the full model's size. Per-layer patterns remove the containers, so memory blocks are sized to individual layers.</p>
+<p>For other architectures, use <code>model.named_modules()</code> to find the right pattern names.</p>
+<h3 id="step-3-reduce-the-number-of-memory-blocks">Step 3: Reduce the number of memory blocks<a class="headerlink" href="#step-3-reduce-the-number-of-memory-blocks" title="Permanent link">&para;</a></h3>
+<p>Step 2 reduces each <abbr title="A pre-allocated GPU memory region used by block-based transfer modes for pipelined CPU-to-GPU copies.">memory block</abbr>'s <em>size</em>; this step reduces the <em>count</em>. Fewer memory blocks means less total GPU memory reserved:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">OffloadConfig</span><span class="p">(</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    <span class="n">transfer_mode</span><span class="o">=</span><span class="s2">"allocation_block_transfer"</span><span class="p">,</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">num_blocks</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>   <span class="c1"># Reduce from the default of 4</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="p">)</span>
+</span></code></pre></div>
+<h3 id="step-4-check-for-insufficient-free-gpu-memory-error">Step 4: Check for "Insufficient free GPU memory" error<a class="headerlink" href="#step-4-check-for-insufficient-free-gpu-memory-error" title="Permanent link">&para;</a></h3>
+<p>If you see:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>RuntimeError: Insufficient free GPU memory: X.XX GiB available
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>(free=..., reserved=..., allocated=...), minimum required: 0.25 GiB
+</span></code></pre></div>
+<p>The GPU has less than 256 MiB free when the strategy runs — typically consumed by other processes, the CUDA context, or a large KV cache.</p>
+<p><strong>Resolve:</strong></p>
+<ul>
+<li>Free other GPU processes or reduce KV cache / batch size.</li>
+<li>In vLLM or TRT-LLM, lower GPU memory reservation so FlexTensor has room.</li>
+<li>Set <code>max_gpu_mem_fraction=None</code> to switch to <abbr title="Strategy mode activated by max_gpu_mem_fraction=None — optimises for throughput with no explicit memory cap.">latency mode</abbr> — this bypasses the memory budget check, but if the GPU genuinely has no free memory, block allocations will still fail with a CUDA OOM.</li>
+</ul>
+<hr />
+<h2 id="resolve-host-out-of-memory-errors">Resolve Host Out-of-Memory Errors<a class="headerlink" href="#resolve-host-out-of-memory-errors" title="Permanent link">&para;</a></h2>
+<p><strong>Problem</strong>: Python <code>MemoryError</code>, the Linux OOM killer terminating the process (<code>Killed</code>), or severe swap thrashing during discovery or profiling.</p>
+<h3 id="why-this-happens_1">Why this happens<a class="headerlink" href="#why-this-happens_1" title="Permanent link">&para;</a></h3>
+<p>FlexTensor copies offloaded weights into pinned (page-locked) CPU memory, which cannot be swapped — it consumes physical RAM exclusively. With <code>include_patterns=["*"]</code>, every discovered weight is pinned, which can exhaust host RAM on large models.</p>
+<p>Since <code>pin_memory()</code> copies data, the original and pinned weights coexist briefly — peak host memory is roughly model size plus one layer's worth of weights. PyTorch may also round pinned allocations to the next power of two (<a href="https://github.com/pytorch/pytorch/issues/150517">pytorch#150517</a>).</p>
+<h3 id="step-1-check-host-memory-pressure">Step 1: Check host memory pressure<a class="headerlink" href="#step-1-check-host-memory-pressure" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>free<span class="w"> </span>-h<span class="w">              </span><span class="c1"># available memory and swap</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>dmesg<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span>oom<span class="w">  </span><span class="c1"># check for OOM killer</span>
+</span></code></pre></div>
+<p>You can also inspect the <code>host_memory</code> object in FlexTensor's <a href="#debug-component-initialization">instrumentation output</a> for a memory snapshot at inference transition.</p>
+<h3 id="step-2-narrow-the-include-patterns_1">Step 2: Narrow the include patterns<a class="headerlink" href="#step-2-narrow-the-include-patterns_1" title="Permanent link">&para;</a></h3>
+<p>Narrow <code>include_patterns</code> from <code>["*"]</code> to target specific layers:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">OffloadConfig</span><span class="p">(</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>    <span class="n">include_patterns</span><span class="o">=</span><span class="p">[</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>        <span class="s2">"model.embed_tokens"</span><span class="p">,</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>        <span class="s2">"model.layers.*"</span><span class="p">,</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>        <span class="s2">"model.norm"</span><span class="p">,</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>        <span class="s2">"lm_head"</span><span class="p">,</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>    <span class="p">],</span>
+</span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="p">)</span>
+</span></code></pre></div>
+<p>See <a href="#step-2-narrow-the-include-patterns">Step 2: Narrow the include patterns</a> under <a href="#resolve-gpu-out-of-memory-errors">Resolve GPU Out-of-Memory Errors</a> for more detail.</p>
+<p><strong>Why this helps:</strong> Fewer trapped modules means fewer weights pinned in host RAM.</p>
+<h3 id="step-3-switch-to-in-place-pinning">Step 3: Switch to in-place pinning<a class="headerlink" href="#step-3-switch-to-in-place-pinning" title="Permanent link">&para;</a></h3>
+<p>The default <code>pin_memory()</code> path copies each weight into a fresh allocation from PyTorch's caching pinned allocator, which rounds up to the next power of two (<a href="https://github.com/pytorch/pytorch/issues/150517">pytorch#150517</a>) and briefly holds both the source and pinned copy in RAM. Switching to <code>host_register</code> mode pins the <em>existing</em> allocation in place via <code>cudaHostRegister</code> — no copy, no rounding doubling:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">OffloadConfig</span><span class="p">(</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>    <span class="n">pinned_memory</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>    <span class="n">pinned_memory_mode</span><span class="o">=</span><span class="s2">"host_register"</span><span class="p">,</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="p">)</span>
+</span></code></pre></div>
+<p>This keeps the performance benefit of pinned memory (non-blocking DMA) while removing the peak-RAM spike. On a CUDA host with a broken <code>cudart</code> binding, falls back to <code>"torch"</code> with a warning. On a CPU-only host, <code>pinned_memory=True</code> raises at <code>TensorManager</code> construction time — offloading without a GPU has no purpose, and silently degrading would mask the misconfiguration as a perf regression. Set <code>pinned_memory=False</code> on CPU-only hosts.</p>
+<div class="admonition note">
+<p class="admonition-title">SHM segments are already pinned in place</p>
+<p><code>pinned_memory_mode</code> only affects the non-SHM allocator path. When <code>shm_enabled=True</code>, the SHM segment itself is always registered in place via <code>cudaHostRegister</code> (regardless of mode), because POSIX shared-memory buffers can't be re-allocated through PyTorch's pinned allocator. Switching to <code>"host_register"</code> mode is what lets the <em>non-SHM</em> per-layer blocks avoid the doubling described above.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Pinning <code>RuntimeError</code> from <code>cudaHostRegister</code> or <code>tensor.pin_memory()</code></p>
+<p>Pinning is strict at every site that pins host memory — model preparation (<code>preprocess_model</code>), warmup, profiling, and benchmark passes. The first failure aborts the offending phase with a <code>RuntimeError</code> that names the operation, pointer, size, and cudart rc. Common causes:</p>
+<ul>
+<li><code>RLIMIT_MEMLOCK</code> exhaustion (most frequent in containers / unprivileged processes).</li>
+<li>Pinned-pool pressure (PyTorch's caching pinned allocator out of headroom).</li>
+<li>A non-zero <code>cudaHostRegister</code> rc (rare; usually surfaces as <code>cudaError… 712 / 717</code>).</li>
+</ul>
+<p>Mitigations, in rough order of preference:</p>
+<ul>
+<li>Raise the lock budget — <code>ulimit -l unlimited</code> (or <code>LimitMEMLOCK=infinity</code> for systemd units, <code>--ulimit memlock=-1</code> for Docker).</li>
+<li>Reduce pinned footprint — narrow <code>include_patterns</code> (or add <code>exclude_patterns</code>) to offload fewer modules.</li>
+<li>Switch modes — <code>pinned_memory_mode="torch"</code> uses PyTorch's allocator instead of <code>cudaHostRegister</code>, but it still locks pages so it doesn't relieve <code>RLIMIT_MEMLOCK</code>; only worth trying when the failure is specific to in-place registration.</li>
+<li>Disable pinning entirely — <code>pinned_memory=False</code>. Loses non-blocking transfer overlap but lets the pipeline run.</li>
+</ul>
+</div>
+<h3 id="step-4-disable-pinned-memory-as-a-last-resort">Step 4: Disable pinned memory as a last resort<a class="headerlink" href="#step-4-disable-pinned-memory-as-a-last-resort" title="Permanent link">&para;</a></h3>
+<p>If host memory is still exhausted, disable pinned memory entirely:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">OffloadConfig</span><span class="p">(</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>    <span class="n">pinned_memory</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="p">)</span>
+</span></code></pre></div>
+<div class="admonition warning">
+<p class="admonition-title">Performance trade-off</p>
+<p>Unpinned memory can be swapped (preventing OOM) but disables asynchronous DMA, making CPU↔GPU transfers slower.</p>
+</div>
+<hr />
+<h2 id="fix-cuda-device-mismatch-errors">Fix CUDA Device Mismatch Errors<a class="headerlink" href="#fix-cuda-device-mismatch-errors" title="Permanent link">&para;</a></h2>
+<p><strong>Problem</strong>: A runtime error such as <code>RuntimeError: Expected all tensors to be on the same device</code> during inference.</p>
+<p>This typically occurs when FlexTensor offloads a parameter but a custom kernel (for example, a Triton or CUDA kernel) accesses a related metadata attribute (such as a scale <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr>) that was not mapped during the <abbr title="First active phase — discovers which parameters belong to which traps by intercepting PyTorch operations.">discovery phase</abbr>.</p>
+<h3 id="step-1-verify-tensor-discovery-is-enabled">Step 1: Verify <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> discovery is enabled<a class="headerlink" href="#step-1-verify-tensor-discovery-is-enabled" title="Permanent link">&para;</a></h3>
+<p>Both untraced <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> discovery and ModuleTracker are always enabled (hardcoded). No configuration is required.</p>
+<h3 id="step-2-use-the-offload-api-with-forward-patching">Step 2: Use the <code>offload()</code> API with <abbr title="The mechanism where offload() replaces a module's forward method with a wrapper that manages weight transfers. Also called &quot;auto trap.&quot;">forward patching</abbr><a class="headerlink" href="#step-2-use-the-offload-api-with-forward-patching" title="Permanent link">&para;</a></h3>
+<p>Auto <abbr title="A context manager that wraps a module's forward pass to manage weight loading, timing, and release for that module.">trap</abbr> discovery (the most reliable strategy) only activates when you use <code>flextensor.offload()</code> with explicit <code>include_patterns</code>:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">OffloadConfig</span><span class="p">(</span><span class="n">include_patterns</span><span class="o">=</span><span class="p">[</span><span class="s2">"layers.*"</span><span class="p">])</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="n">model</span> <span class="o">=</span> <span class="n">flextensor</span><span class="o">.</span><span class="n">offload</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">)</span>
+</span></code></pre></div>
+<p>Using manual <code>offload_block</code> context managers without <abbr title="The mechanism where offload() replaces a module's forward method with a wrapper that manages weight transfers. Also called &quot;auto trap.&quot;">forward patching</abbr> relies on Module Tracker or Prefix Matching, which may miss tensors with unconventional naming.</p>
+<h3 id="step-3-debug-with-instrumentation">Step 3: Debug with instrumentation<a class="headerlink" href="#step-3-debug-with-instrumentation" title="Permanent link">&para;</a></h3>
+<p>Enable debug instrumentation to capture component initialization details and verify the parameter-to-<abbr title="A context manager that wraps a module's forward pass to manage weight loading, timing, and release for that module.">trap</abbr> mapping:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">OffloadConfig</span><span class="p">(</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>    <span class="n">enable_instrumentation</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>    <span class="n">include_patterns</span><span class="o">=</span><span class="p">[</span><span class="s2">"layers.*"</span><span class="p">],</span>
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="p">)</span>
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="n">model</span> <span class="o">=</span> <span class="n">offload</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">)</span>
+</span></code></pre></div>
+<p>See <a href="#debug-component-initialization">Debug Component Initialization</a> for how to interpret the output.</p>
+<p>For a detailed explanation of how <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> discovery works, see <a href="../../explanation/tensor-discovery/">Tensor Discovery</a>.</p>
+<hr />
+<h2 id="diagnose-high-performance-overhead">Diagnose High Performance Overhead<a class="headerlink" href="#diagnose-high-performance-overhead" title="Permanent link">&para;</a></h2>
+<p><strong>Problem</strong>: Model inference is slower than expected. FlexTensor achieves low latency overhead by pipelining weight transfers to overlap with GPU computation, under the assumptions described <a href="#when-to-expect-higher-overhead">below</a>.</p>
+<h3 id="step-1-check-that-inference-phase-has-been-reached">Step 1: Check that <abbr title="Third active phase — applies the computed offloading strategy for production execution. No timing collection.">inference phase</abbr> has been reached<a class="headerlink" href="#step-1-check-that-inference-phase-has-been-reached" title="Permanent link">&para;</a></h3>
+<p>Discovery and profiling iterations are intentionally slower—overhead measurements are only meaningful after all discovery and profiling iterations complete:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">OffloadConfig</span><span class="p">(</span><span class="n">discovery_iters</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">profiling_iters</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">model</span> <span class="o">=</span> <span class="n">flextensor</span><span class="o">.</span><span class="n">offload</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">)</span>
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>
+</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="c1"># First discovery_iters + profiling_iters iterations are measurement phases</span>
+</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">batch</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">dataloader</span><span class="p">):</span>
+</span><span id="__span-19-6"><a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>    <span class="n">output</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span>
+</span><span id="__span-19-7"><a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>    <span class="k">if</span> <span class="n">i</span> <span class="o">==</span> <span class="n">config</span><span class="o">.</span><span class="n">discovery_iters</span> <span class="o">+</span> <span class="n">config</span><span class="o">.</span><span class="n">profiling_iters</span><span class="p">:</span>
+</span><span id="__span-19-8"><a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"Inference phase reached — timing is now production overhead"</span><span class="p">)</span>
+</span></code></pre></div>
+<h3 id="step-2-increase-profile-iterations-for-noisy-environments">Step 2: Increase profile iterations for noisy environments<a class="headerlink" href="#step-2-increase-profile-iterations-for-noisy-environments" title="Permanent link">&para;</a></h3>
+<p>On shared or cloud GPUs, thermal throttling and multi-tenancy can cause noisy timing data. Increase <code>profiling_iters</code> for a more accurate strategy:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">OffloadConfig</span><span class="p">(</span><span class="n">profiling_iters</span><span class="o">=</span><span class="mi">20</span><span class="p">)</span>  <span class="c1"># default: 10</span>
+</span></code></pre></div>
+<h3 id="step-3-tune-transfer-mode-and-block-count">Step 3: Tune <abbr title="The mechanism for physically moving weights between CPU and GPU (strategy, allocation_block_transfer, or raw_block_transfer).">transfer mode</abbr> and block count<a class="headerlink" href="#step-3-tune-transfer-mode-and-block-count" title="Permanent link">&para;</a></h3>
+<p>The <code>allocation_block_transfer</code> mode with more blocks can reduce stalls by overlapping transfers with computation:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">OffloadConfig</span><span class="p">(</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>    <span class="n">transfer_mode</span><span class="o">=</span><span class="s2">"allocation_block_transfer"</span><span class="p">,</span>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>    <span class="n">num_blocks</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>                  <span class="c1"># More blocks = more parallelism</span>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="p">)</span>
+</span></code></pre></div>
+<p>Transfer rearrangement is auto-enabled when gap layers are detected.</p>
+<h3 id="when-to-expect-higher-overhead">When to expect higher overhead<a class="headerlink" href="#when-to-expect-higher-overhead" title="Permanent link">&para;</a></h3>
+<p>Low overhead depends on the CPU-to-GPU interconnect bandwidth being sufficient to transfer offloaded weights within the available compute time. This condition may not hold when:</p>
+<ul>
+<li><strong>Low concurrency / small batch decode</strong>: At batch=1, per-layer compute can be very short (1-3 ms for typical LLMs), while transferring hundreds of MB of weights may take 15-25 ms depending on interconnect bandwidth. The transfer cannot be overlapped with such short compute.</li>
+<li><strong>High offload ratio</strong>: When a large fraction of model weights are offloaded (e.g., &gt;40%), most layers require significant weight transfers. Even modest stalls per layer accumulate across dozens of layers.</li>
+<li><strong>Profiling/production mismatch</strong>: FlexTensor profiles at a specific batch size to measure per-layer compute time and plan transfers accordingly. If the production workload has a substantially different batch size (e.g., profiling at large prefill size but serving single-token decode at low concurrency), the transfer schedule may be planned for a compute window that does not exist at serving time.</li>
+</ul>
+<p><strong>How to check</strong>: Enable <code>FT_ENABLE_DIAGNOSTICS=1</code> and examine the block assignment table in the log output. Compare the "Compute" column (per-layer compute time in ms) with the transfer sizes. If the time to transfer a layer's offloaded weights exceeds the preceding layer's compute time, significant overhead is expected.</p>
+<p><strong>Mitigation</strong>:</p>
+<ul>
+<li>Increase request concurrency — larger decode batches increase per-layer compute, improving transfer overlap.</li>
+<li>Reduce the offload ratio by increasing <code>max_gpu_mem_fraction</code> (if KV-cache budget allows).</li>
+<li>Accept the latency tradeoff when serving a model that otherwise would not fit in GPU memory — FlexTensor enables serving, but the interconnect bandwidth constrains throughput.</li>
+</ul>
+<hr />
+<h2 id="fix-unexpected-behavior-after-modifying-a-patched-model">Fix Unexpected Behavior After Modifying a Patched Model<a class="headerlink" href="#fix-unexpected-behavior-after-modifying-a-patched-model" title="Permanent link">&para;</a></h2>
+<p><strong>Problem</strong>: You added, removed, or replaced a module in your model after calling <code>offload()</code>, and the new module is not being offloaded, or you observe incorrect behavior such as device mismatch errors or missing <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> coverage.</p>
+<h3 id="why-this-happens_2">Why This Happens<a class="headerlink" href="#why-this-happens_2" title="Permanent link">&para;</a></h3>
+<p>When you call <code>flextensor.offload(model, config=config)</code>, FlexTensor patches the <code>forward</code> methods of matched modules and builds a parameter-to-<abbr title="A context manager that wraps a module's forward pass to manage weight loading, timing, and release for that module.">trap</abbr> map during discovery. This map is fixed at the end of the <abbr title="First active phase — discovers which parameters belong to which traps by intercepting PyTorch operations.">discovery phase</abbr>. Any module added to the model after <code>offload()</code> is called is not part of that map and will not be offloaded.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="c1"># BAD: new layer is not covered by offloading</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="n">config</span> <span class="o">=</span> <span class="n">flextensor</span><span class="o">.</span><span class="n">OffloadConfig</span><span class="p">(</span><span class="n">include_patterns</span><span class="o">=</span><span class="p">[</span><span class="s2">"layers.*"</span><span class="p">])</span>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="n">model</span> <span class="o">=</span> <span class="n">flextensor</span><span class="o">.</span><span class="n">offload</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">)</span>
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="n">model</span><span class="o">.</span><span class="n">layers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">NewLayer</span><span class="p">())</span>  <span class="c1"># NewLayer will not be offloaded</span>
+</span></code></pre></div>
+<h3 id="solution-release-and-re-apply-offloading">Solution: Release and Re-apply Offloading<a class="headerlink" href="#solution-release-and-re-apply-offloading" title="Permanent link">&para;</a></h3>
+<p>Call <code>release()</code> on the offload manager to remove all patches and clear the parameter map, modify the model, then call <code>offload()</code> again:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">flextensor</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="n">config</span> <span class="o">=</span> <span class="n">flextensor</span><span class="o">.</span><span class="n">OffloadConfig</span><span class="p">(</span><span class="n">include_patterns</span><span class="o">=</span><span class="p">[</span><span class="s2">"layers.*"</span><span class="p">])</span>
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>
+</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="c1"># GOOD: patch after all modifications are done</span>
+</span><span id="__span-23-6"><a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="n">model</span><span class="o">.</span><span class="n">layers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">NewLayer</span><span class="p">())</span>
+</span><span id="__span-23-7"><a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="n">model</span> <span class="o">=</span> <span class="n">flextensor</span><span class="o">.</span><span class="n">offload</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">)</span>
+</span></code></pre></div>
+<p>If you have already called <code>offload()</code> and need to modify the model afterward:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">flextensor</span>
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="n">config</span> <span class="o">=</span> <span class="n">flextensor</span><span class="o">.</span><span class="n">OffloadConfig</span><span class="p">(</span><span class="n">include_patterns</span><span class="o">=</span><span class="p">[</span><span class="s2">"layers.*"</span><span class="p">])</span>
+</span><span id="__span-24-4"><a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="n">model</span> <span class="o">=</span> <span class="n">flextensor</span><span class="o">.</span><span class="n">offload</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">)</span>
+</span><span id="__span-24-5"><a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>
+</span><span id="__span-24-6"><a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="c1"># Later: modify the model</span>
+</span><span id="__span-24-7"><a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="n">om</span> <span class="o">=</span> <span class="n">flextensor</span><span class="o">.</span><span class="n">get_offload_manager</span><span class="p">()</span>
+</span><span id="__span-24-8"><a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a><span class="n">om</span><span class="o">.</span><span class="n">release</span><span class="p">()</span>                          <span class="c1"># Remove all patches and tensor map</span>
+</span><span id="__span-24-9"><a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a><span class="n">model</span><span class="o">.</span><span class="n">layers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">NewLayer</span><span class="p">())</span>
+</span><span id="__span-24-10"><a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a><span class="n">model</span> <span class="o">=</span> <span class="n">flextensor</span><span class="o">.</span><span class="n">offload</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">)</span>  <span class="c1"># Re-apply</span>
+</span></code></pre></div>
+<h3 id="prevention">Prevention<a class="headerlink" href="#prevention" title="Permanent link">&para;</a></h3>
+<p>The safest approach is to finalize your model architecture before calling <code>offload()</code>. Apply all <code>append</code>, <code>insert</code>, <code>pop</code>, or attribute assignments to the model before patching it.</p>
+<hr />
+<h2 id="fix-cross-thread-manager-access-errors">Fix Cross-Thread Manager Access Errors<a class="headerlink" href="#fix-cross-thread-manager-access-errors" title="Permanent link">&para;</a></h2>
+<p><strong>Problem</strong>: A <code>RuntimeError</code> with a message like <code>OffloadManager 'default' belongs to thread 12345, but accessed from thread 67890</code>, or silent data corruption when using FlexTensor from multiple threads.</p>
+<div class="admonition danger">
+<p class="admonition-title">FlexTensor is not thread-safe</p>
+<p>The entire offloading lifecycle — setup, discovery, profiling, <strong>and inference</strong> — must run on a single thread per manager. FlexTensor's internal state (<abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> maps, CUDA streams, memory blocks, profiling counters) is not protected against concurrent access. Using a patched model from multiple threads in parallel can cause silent data corruption, CUDA errors, or incorrect inference results even if no <code>RuntimeError</code> is raised.</p>
+</div>
+<p>The <code>get_offload_manager()</code> thread-ownership guard catches the most common mistake (calling the API from the wrong thread), but it does <strong>not</strong> protect against running forward passes on a patched model concurrently.</p>
+<h3 id="step-1-identify-the-conflicting-access">Step 1: Identify the conflicting access<a class="headerlink" href="#step-1-identify-the-conflicting-access" title="Permanent link">&para;</a></h3>
+<p>The error message includes both thread IDs. Check your code for places where <code>get_offload_manager()</code> (or the convenience functions <code>offload()</code>, <code>init()</code>, <code>set_config()</code>, etc.) is called from a background thread, callback, or worker that differs from the thread that originally created the manager. Also check for forward passes on the patched model from multiple threads.</p>
+<h3 id="step-2-use-a-separate-name-model-and-thread-per-manager">Step 2: Use a separate name, model, and thread per manager<a class="headerlink" href="#step-2-use-a-separate-name-model-and-thread-per-manager" title="Permanent link">&para;</a></h3>
+<p>If you need parallel offloading, each thread must have its own manager <strong>and its own model instance</strong>:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">threading</span>
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">flextensor</span>
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>
+</span><span id="__span-25-4"><a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">worker</span><span class="p">(</span><span class="n">thread_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">model</span><span class="p">):</span>
+</span><span id="__span-25-5"><a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a>    <span class="n">config</span> <span class="o">=</span> <span class="n">flextensor</span><span class="o">.</span><span class="n">OffloadConfig</span><span class="p">(</span><span class="n">include_patterns</span><span class="o">=</span><span class="p">[</span><span class="s2">"layers.*"</span><span class="p">])</span>
+</span><span id="__span-25-6"><a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a>    <span class="n">model</span> <span class="o">=</span> <span class="n">flextensor</span><span class="o">.</span><span class="n">offload</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">thread_name</span><span class="p">)</span>
+</span><span id="__span-25-7"><a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a>    <span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">dataloader</span><span class="p">:</span>
+</span><span id="__span-25-8"><a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a>        <span class="n">output</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span>  <span class="c1"># Safe: single thread owns this manager + model</span>
+</span><span id="__span-25-9"><a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a>
+</span><span id="__span-25-10"><a id="__codelineno-25-10" name="__codelineno-25-10" href="#__codelineno-25-10"></a><span class="n">t1</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">worker</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="s2">"worker-1"</span><span class="p">,</span> <span class="n">build_model</span><span class="p">()))</span>
+</span><span id="__span-25-11"><a id="__codelineno-25-11" name="__codelineno-25-11" href="#__codelineno-25-11"></a><span class="n">t2</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">worker</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="s2">"worker-2"</span><span class="p">,</span> <span class="n">build_model</span><span class="p">()))</span>
+</span><span id="__span-25-12"><a id="__codelineno-25-12" name="__codelineno-25-12" href="#__codelineno-25-12"></a><span class="n">t1</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+</span><span id="__span-25-13"><a id="__codelineno-25-13" name="__codelineno-25-13" href="#__codelineno-25-13"></a><span class="n">t2</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+</span></code></pre></div>
+<h3 id="step-3-restructure-to-single-thread-access">Step 3: Restructure to single-thread access<a class="headerlink" href="#step-3-restructure-to-single-thread-access" title="Permanent link">&para;</a></h3>
+<p>If threads must share a single model, perform all FlexTensor operations (offloading, discovery, profiling, and inference) on one thread and dispatch results to other threads afterward. Do not run forward passes on a patched model from multiple threads concurrently.</p>
+<hr />
+<h2 id="collect-gpu-memory-snapshots-in-vllm">Collect GPU Memory Snapshots in vLLM<a class="headerlink" href="#collect-gpu-memory-snapshots-in-vllm" title="Permanent link">&para;</a></h2>
+<p><strong>Problem</strong>: You need a record of GPU memory state at each vLLM worker lifecycle point (after device initialization, model load, KV cache allocation, and warmup) to understand memory pressure, verify headroom, or compare baseline versus offloading deployments.</p>
+<p><strong>Solution</strong>: Use one of the snapshot worker classes, which capture <code>MemorySnapshot</code> readings at each lifecycle stage and write them to a JSON file.</p>
+<h3 id="choose-the-right-worker-class">Choose the Right Worker Class<a class="headerlink" href="#choose-the-right-worker-class" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Worker class</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Standard vLLM, no offloading</td>
+<td><code>SnapshotWorker</code></td>
+</tr>
+<tr>
+<td>vLLM with FlexTensor offloading</td>
+<td><code>FlexTensorSnapshotWorker</code></td>
+</tr>
+</tbody>
+</table>
+<p>Both classes collect snapshots at the same lifecycle points: after <code>init_device</code>, <code>load_model</code>, <code>determine_available_memory</code>, <code>initialize_from_config</code> (KV cache), and <code>compile_or_warm_up_model</code>.</p>
+<h3 id="steps_1">Steps<a class="headerlink" href="#steps_1" title="Permanent link">&para;</a></h3>
+<h4 id="1-set-the-output-directory">1. Set the output directory<a class="headerlink" href="#1-set-the-output-directory" title="Permanent link">&para;</a></h4>
+<p>Snapshots are only written to disk when <code>FT_VLLM_SNAPSHOT_OUTPUT_DIR</code> is set. If the variable is unset or empty, snapshots are collected in memory but discarded when the process exits.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">FT_VLLM_SNAPSHOT_OUTPUT_DIR</span><span class="o">=</span>/tmp/gpu_snapshots
+</span></code></pre></div>
+<h4 id="2-start-vllm-with-the-snapshot-worker">2. Start vLLM with the snapshot worker<a class="headerlink" href="#2-start-vllm-with-the-snapshot-worker" title="Permanent link">&para;</a></h4>
+<p>For a standard vLLM deployment (no FlexTensor offloading):</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>vllm<span class="w"> </span>serve<span class="w"> </span>&lt;model&gt;<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="w">    </span>--worker-cls<span class="w"> </span>flextensor.contrib.vllm.snapshot.SnapshotWorker
+</span></code></pre></div>
+<p>For a FlexTensor offloading deployment:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="nv">FT_ENABLED</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>vllm<span class="w"> </span>serve<span class="w"> </span>&lt;model&gt;<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-28-2"><a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="w">    </span>--worker-cls<span class="w"> </span>flextensor.contrib.vllm.snapshot.FlexTensorSnapshotWorker
+</span></code></pre></div>
+<h4 id="3-inspect-the-output">3. Inspect the output<a class="headerlink" href="#3-inspect-the-output" title="Permanent link">&para;</a></h4>
+<p>After the final warmup step, each worker rank writes a JSON file to <code>FT_VLLM_SNAPSHOT_OUTPUT_DIR</code>:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-29-1"><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>/tmp/gpu_snapshots/
+</span><span id="__span-29-2"><a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a>└── gpu_snapshots_rank0_device0_20260303_120000.json
+</span></code></pre></div>
+<p>The file contains metadata about the worker and a list of snapshot entries, one per lifecycle label:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="p">{</span>
+</span><span id="__span-30-2"><a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="w">  </span><span class="nt">"worker_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"FlexTensorSnapshotWorker"</span><span class="p">,</span>
+</span><span id="__span-30-3"><a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="w">  </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Qwen/Qwen2.5-7B"</span><span class="p">,</span>
+</span><span id="__span-30-4"><a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a><span class="w">  </span><span class="nt">"rank"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+</span><span id="__span-30-5"><a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a><span class="w">  </span><span class="nt">"local_rank"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+</span><span id="__span-30-6"><a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a><span class="w">  </span><span class="nt">"device"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cuda:0"</span><span class="p">,</span>
+</span><span id="__span-30-7"><a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a><span class="w">  </span><span class="nt">"snapshots"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+</span><span id="__span-30-8"><a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a><span class="w">    </span><span class="p">{</span>
+</span><span id="__span-30-9"><a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a><span class="w">      </span><span class="nt">"label"</span><span class="p">:</span><span class="w"> </span><span class="s2">"after_init_device"</span><span class="p">,</span>
+</span><span id="__span-30-10"><a id="__codelineno-30-10" name="__codelineno-30-10" href="#__codelineno-30-10"></a><span class="w">      </span><span class="nt">"gpu_memory"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-30-11"><a id="__codelineno-30-11" name="__codelineno-30-11" href="#__codelineno-30-11"></a><span class="w">        </span><span class="nt">"free_memory"</span><span class="p">:</span><span class="w"> </span><span class="mi">79285829632</span><span class="p">,</span>
+</span><span id="__span-30-12"><a id="__codelineno-30-12" name="__codelineno-30-12" href="#__codelineno-30-12"></a><span class="w">        </span><span class="nt">"cuda_memory"</span><span class="p">:</span><span class="w"> </span><span class="mi">1073741824</span><span class="p">,</span>
+</span><span id="__span-30-13"><a id="__codelineno-30-13" name="__codelineno-30-13" href="#__codelineno-30-13"></a><span class="w">        </span><span class="nt">"torch_memory"</span><span class="p">:</span><span class="w"> </span><span class="mi">536870912</span><span class="p">,</span>
+</span><span id="__span-30-14"><a id="__codelineno-30-14" name="__codelineno-30-14" href="#__codelineno-30-14"></a><span class="w">        </span><span class="nt">"non_torch_memory"</span><span class="p">:</span><span class="w"> </span><span class="mi">536870912</span><span class="p">,</span>
+</span><span id="__span-30-15"><a id="__codelineno-30-15" name="__codelineno-30-15" href="#__codelineno-30-15"></a><span class="w">        </span><span class="nt">"total_memory"</span><span class="p">:</span><span class="w"> </span><span class="mi">85899345920</span><span class="p">,</span>
+</span><span id="__span-30-16"><a id="__codelineno-30-16" name="__codelineno-30-16" href="#__codelineno-30-16"></a><span class="w">        </span><span class="nt">"torch_peak"</span><span class="p">:</span><span class="w"> </span><span class="mi">536870912</span><span class="p">,</span>
+</span><span id="__span-30-17"><a id="__codelineno-30-17" name="__codelineno-30-17" href="#__codelineno-30-17"></a><span class="w">        </span><span class="nt">"timestamp"</span><span class="p">:</span><span class="w"> </span><span class="mf">1741003201.123456</span>
+</span><span id="__span-30-18"><a id="__codelineno-30-18" name="__codelineno-30-18" href="#__codelineno-30-18"></a><span class="w">      </span><span class="p">},</span>
+</span><span id="__span-30-19"><a id="__codelineno-30-19" name="__codelineno-30-19" href="#__codelineno-30-19"></a><span class="w">      </span><span class="nt">"host_memory"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-30-20"><a id="__codelineno-30-20" name="__codelineno-30-20" href="#__codelineno-30-20"></a><span class="w">        </span><span class="nt">"host_memory_total"</span><span class="p">:</span><span class="w"> </span><span class="mi">270122237952</span><span class="p">,</span>
+</span><span id="__span-30-21"><a id="__codelineno-30-21" name="__codelineno-30-21" href="#__codelineno-30-21"></a><span class="w">        </span><span class="nt">"host_memory_used"</span><span class="p">:</span><span class="w"> </span><span class="mi">13204619264</span><span class="p">,</span>
+</span><span id="__span-30-22"><a id="__codelineno-30-22" name="__codelineno-30-22" href="#__codelineno-30-22"></a><span class="w">        </span><span class="nt">"host_memory_available"</span><span class="p">:</span><span class="w"> </span><span class="mi">256917618688</span><span class="p">,</span>
+</span><span id="__span-30-23"><a id="__codelineno-30-23" name="__codelineno-30-23" href="#__codelineno-30-23"></a><span class="w">        </span><span class="nt">"swap_total"</span><span class="p">:</span><span class="w"> </span><span class="mi">8589934592</span><span class="p">,</span>
+</span><span id="__span-30-24"><a id="__codelineno-30-24" name="__codelineno-30-24" href="#__codelineno-30-24"></a><span class="w">        </span><span class="nt">"swap_used"</span><span class="p">:</span><span class="w"> </span><span class="mi">107374182</span><span class="p">,</span>
+</span><span id="__span-30-25"><a id="__codelineno-30-25" name="__codelineno-30-25" href="#__codelineno-30-25"></a><span class="w">        </span><span class="nt">"swap_free"</span><span class="p">:</span><span class="w"> </span><span class="mi">8482560410</span>
+</span><span id="__span-30-26"><a id="__codelineno-30-26" name="__codelineno-30-26" href="#__codelineno-30-26"></a><span class="w">      </span><span class="p">}</span>
+</span><span id="__span-30-27"><a id="__codelineno-30-27" name="__codelineno-30-27" href="#__codelineno-30-27"></a><span class="w">    </span><span class="p">}</span>
+</span><span id="__span-30-28"><a id="__codelineno-30-28" name="__codelineno-30-28" href="#__codelineno-30-28"></a><span class="w">  </span><span class="p">]</span>
+</span><span id="__span-30-29"><a id="__codelineno-30-29" name="__codelineno-30-29" href="#__codelineno-30-29"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>All fields in <code>gpu_memory</code> and <code>host_memory</code> are in bytes. Divide by <code>1024 ** 3</code> to convert to GiB.</p>
+<div class="admonition note">
+<p class="admonition-title">Multi-rank deployments</p>
+<p>In <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr>-parallel deployments, each rank writes its own file. The filename includes <code>rank</code> and <code>device</code> to distinguish them.</p>
+</div>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/ai-dynamo/flextensor" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.expand", "navigation.sections", "navigation.indexes", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+    
+  </body>
+</html>

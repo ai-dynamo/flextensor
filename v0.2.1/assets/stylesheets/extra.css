@@ -1,0 +1,44 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* Custom styles for FlexTensor documentation */
+
+/* Logo sizing in header */
+.md-header__button.md-logo :is(img,svg) {
+    height: 1.8rem !important;
+}
+
+/* NVIDIA green accent */
+:root {
+  --md-primary-fg-color: #76b900;
+  --md-primary-fg-color--light: #8bc220;
+  --md-primary-fg-color--dark: #5a8f00;
+  --md-accent-fg-color: #76b900;
+}
+
+/* Code block styling */
+.md-typeset code {
+  background-color: var(--md-code-bg-color);
+  border-radius: 0.2rem;
+  padding: 0 0.3em;
+}
+
+/* Grid cards styling for home page */
+.md-typeset .grid.cards > ul > li {
+  border: 0.05rem solid var(--md-default-fg-color--lightest);
+  border-radius: 0.2rem;
+  padding: 1rem;
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--md-accent-fg-color);
+  box-shadow: 0 0.2rem 0.5rem rgba(0, 0, 0, 0.1);
+}
+
+/* Version selector styling */
+.md-header__topic {
+  font-weight: 700;
+}
