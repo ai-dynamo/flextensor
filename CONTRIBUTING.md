@@ -127,16 +127,19 @@ $ git checkout -b name-of-your-bugfix-or-feature
 
 Now you can make your changes locally.
 
-5. Run the configured pre-commit checks, type checker and import checks:
+5. Run the configured pre-commit checks and type checker:
 
 ```shell
 $ pre-commit run --all-files
 $ make mypy
-$ make lint-imports
 ```
 
-The pre-commit configuration includes Ruff linting and formatting. Run the unit
-tests separately; these do not require a GPU:
+The pre-commit hooks run Ruff linting and formatting, shell and YAML checks,
+whitespace fixers and the import-linter contracts (`make lint-imports`). Some
+hooks fix files in place; stage the changes and re-run. Type checking is not
+part of pre-commit, so run `make mypy` separately.
+
+Run the unit tests separately; these do not require a GPU:
 
 ```shell
 $ make test-unit
