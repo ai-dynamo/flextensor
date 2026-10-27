@@ -1,0 +1,3987 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Tensor offloading and management library for PyTorch">
+      
+      
+      
+        <link rel="canonical" href="https://ai-dynamo.github.io/flextensor/latest/api/advanced/">
+      
+      
+        <link rel="prev" href="../strategies/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Advanced - FlexTensor Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#advanced-api" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="FlexTensor Documentation" class="md-header__button md-logo" aria-label="FlexTensor Documentation" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            FlexTensor Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Advanced
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ai-dynamo/flextensor" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    flextensor
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  Get Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../explanation/configuration/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Understand
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../how-to/troubleshooting/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="https://github.com/ai-dynamo/flextensor" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Dashboard
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="FlexTensor Documentation" class="md-nav__button md-logo" aria-label="FlexTensor Documentation" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    FlexTensor Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ai-dynamo/flextensor" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    flextensor
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get Started
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quick-start/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Understand
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Understand
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/pattern-matching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pattern Matching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/phases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internal Phases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/tensor-discovery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tensor Discovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/configure-for-common-scenarios/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configure for Common Scenarios
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/exclude-patterns/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exclude Patterns
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simplified/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simplified API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../offload-manager/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OffloadManager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../strategies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Strategies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Advanced
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Advanced
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;TensorManager
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" TensorManager">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.set_model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;set_model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.initialize_warmup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;initialize_warmup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.initialize_profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;initialize_profile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.initialize_inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;initialize_inference
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.prepare_warmup_mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;prepare_warmup_mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.prepare_profile_mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;prepare_profile_mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.prepare_infer_mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;prepare_infer_mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.trap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;trap
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.release_memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;release_memory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.get_gpu_memory_usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_gpu_memory_usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.get_memory_transfer_stats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_memory_transfer_stats
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.benchmark_context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;benchmark_context
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.run_profile_suite" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;run_profile_suite
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.save_profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;save_profile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.load_profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;load_profile
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" load_profile">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.load_profile--now-the-model-is-ready-for-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Now the model is ready for inference
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.load_state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;load_state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.restore_state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;restore_state
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmark-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark Modes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#flextensor.benchmark_tensor_mode.TensorBenchmarkMode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;TensorBenchmarkMode
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" TensorBenchmarkMode">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.benchmark_tensor_mode.TensorBenchmarkMode.get_results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_results
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#flextensor.benchmark_tensor_mode.BenchmarkReplace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;BenchmarkReplace
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" BenchmarkReplace">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.benchmark_tensor_mode.BenchmarkReplace.get_results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_results
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#flextensor.benchmark_tensor_mode.PreloadToDevice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;PreloadToDevice
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" PreloadToDevice">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.benchmark_tensor_mode.PreloadToDevice.get_results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_results
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/ai-dynamo/flextensor" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;TensorManager
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" TensorManager">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.set_model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;set_model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.initialize_warmup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;initialize_warmup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.initialize_profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;initialize_profile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.initialize_inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;initialize_inference
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.prepare_warmup_mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;prepare_warmup_mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.prepare_profile_mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;prepare_profile_mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.prepare_infer_mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;prepare_infer_mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.trap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;trap
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.release_memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;release_memory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.get_gpu_memory_usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_gpu_memory_usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.get_memory_transfer_stats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_memory_transfer_stats
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.benchmark_context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;benchmark_context
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.run_profile_suite" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;run_profile_suite
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.save_profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;save_profile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.load_profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;load_profile
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" load_profile">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.load_profile--now-the-model-is-ready-for-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Now the model is ready for inference
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.load_state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;load_state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.tensor_manager.TensorManager.restore_state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;restore_state
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmark-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark Modes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#flextensor.benchmark_tensor_mode.TensorBenchmarkMode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;TensorBenchmarkMode
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" TensorBenchmarkMode">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.benchmark_tensor_mode.TensorBenchmarkMode.get_results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_results
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#flextensor.benchmark_tensor_mode.BenchmarkReplace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;BenchmarkReplace
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" BenchmarkReplace">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.benchmark_tensor_mode.BenchmarkReplace.get_results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_results
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#flextensor.benchmark_tensor_mode.PreloadToDevice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;PreloadToDevice
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" PreloadToDevice">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#flextensor.benchmark_tensor_mode.PreloadToDevice.get_results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_results
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<!--
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+-->
+<h1 id="advanced-api">Advanced API<a class="headerlink" href="#advanced-api" title="Permanent link">&para;</a></h1>
+<p>Lower-level components for custom workflows. In most cases, use the
+<a href="../simplified/">Simplified API</a> or <a href="../offload-manager/"><code>OffloadManager</code></a> instead.</p>
+<p><code>TensorManager</code> provides direct control over discovery, profiling, and inference phases.
+See <a href="../../explanation/phases/">Internal Phases</a> for details on how these components work together.</p>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="flextensor.tensor_manager.TensorManager" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">TensorManager</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">TensorManager</span><span class="p">(</span><span class="n">device_gpu</span><span class="p">,</span> <span class="n">tensor_manager_load_strategy</span><span class="p">,</span> <span class="n">pinned_memory</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">loader_type</span><span class="o">=</span><span class="s1">'allocation_block_transfer'</span><span class="p">,</span> <span class="n">remove_layers_operations</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">blocks</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">move_top_level_buffers_to_gpu</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">use_shm</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">include_patterns</span><span class="p">:</span> <span class="n"><span title="list">list</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">exclude_patterns</span><span class="p">:</span> <span class="n"><span title="list">list</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">enable_diagnostics</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">max_gpu_mem_fraction</span><span class="p">:</span> <span class="n"><span title="float">float</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">_direct_mode</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">_use_trace_tensor</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">_rearrange_transfers</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">_compute_transfer_gap</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span> <span class="n">_enable_untraced_tensor_discovery</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>Initialize TensorManager with configurable <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> loading strategy.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">PARAMETER</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>device_gpu</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>GPU device to use</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>tensor_manager_load_strategy</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Strategy for loading tensors</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>pinned_memory</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Whether to use pinned (page-locked) memory for CPU tensors.
+Required for non-blocking transfers on a separate CUDA stream so that
+weight copies can overlap with GPU computation. Increases host memory
+pressure since pinned pages cannot be swapped. (default: True)</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="bool">bool</span></code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>True</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>loader_type</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Type of <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> loader to use. Options:
+- "strategy": Uses TensorStrategyLoader
+- "raw_block_transfer": Uses PreallocatedBatchTransferTensorLoader with RawBlockController
+- "allocation_block_transfer": Uses PreallocatedBatchTransferTensorLoader with AllocationBlockController</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>&#39;allocation_block_transfer&#39;</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>remove_layers_operations</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>List of operations to remove layers from the strategy map</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>None</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>blocks</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Number of blocks to use for the block transfer loaders (default: 4)</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>4</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>move_top_level_buffers_to_gpu</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Whether to move top-level model buffers to GPU
+during discovery initialization (default: True)</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>True</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>include_patterns</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>List of patterns to include for offloading. Parameters not matching
+are kept on GPU permanently (default: None → ["*"]).</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="list">list</span>[<span title="str">str</span>] | None</code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>None</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>exclude_patterns</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>List of patterns to exclude from offloading. Passed through to <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr>
+discovery for parameter-level filtering (default: None)</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="list">list</span>[<span title="str">str</span>] | None</code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>None</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>enable_diagnostics</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Whether to log diagnostic information (layer duration statistics,
+block assignment table) after strategy computation (default: False)</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="bool">bool</span></code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>False</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>max_gpu_mem_fraction</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Fraction of total GPU memory to use as budget, in (0.0, 1.0].
+Resolved to bytes at compute time via :meth:<code>_resolve_gpu_budget</code>. If None,
+no memory constraint is applied (<abbr title="Strategy mode activated by max_gpu_mem_fraction=None — optimises for throughput with no explicit memory cap.">latency mode</abbr>). (default: None)</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="float">float</span> | None</code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>None</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>_direct_mode</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Internal debug flag — when False, uses TorchFunctionMode-based
+traps instead of direct <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> replacement. Significant overhead; kept as
+a debug fallback. Not part of the public API.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="bool">bool</span></code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>True</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>_use_trace_tensor</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Internal debug flag — enables TraceTensor + BenchmarkReplace
+for per-<abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> transfer timing. Not part of the public API.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="bool">bool</span></code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>False</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>_rearrange_transfers</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Internal — whether to enable transfer rearrangement.
+Auto-enabled when permanent gap layers are detected. (default: False)</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="bool">bool</span></code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>False</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>_compute_transfer_gap</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Internal — minimum layer gap between a block's compute
+and its next transfer during rearrangement. (default: 1)</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="int">int</span></code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>1</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>_enable_untraced_tensor_discovery</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Internal — whether to discover untraced
+tensors (e.g., FP8 weights passed to Triton kernels). (default: True)</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="bool">bool</span></code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>True</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.tensor_manager.TensorManager.set_model" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">set_model</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager.set_model" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">set_model</span><span class="p">(</span><span class="n">model</span><span class="p">)</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.tensor_manager.TensorManager.initialize_warmup" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">initialize_warmup</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager.initialize_warmup" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">initialize_warmup</span><span class="p">()</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.tensor_manager.TensorManager.initialize_profile" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">initialize_profile</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager.initialize_profile" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">initialize_profile</span><span class="p">()</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.tensor_manager.TensorManager.initialize_inference" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">initialize_inference</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager.initialize_inference" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">initialize_inference</span><span class="p">()</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.tensor_manager.TensorManager.prepare_warmup_mode" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">prepare_warmup_mode</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager.prepare_warmup_mode" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">prepare_warmup_mode</span><span class="p">()</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.tensor_manager.TensorManager.prepare_profile_mode" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">prepare_profile_mode</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager.prepare_profile_mode" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">prepare_profile_mode</span><span class="p">()</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.tensor_manager.TensorManager.prepare_infer_mode" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">prepare_infer_mode</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager.prepare_infer_mode" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">prepare_infer_mode</span><span class="p">()</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Prepare inference mode from fresh profiling data.</p>
+<p>This method is called after profiling to compute the load strategy and create
+the appropriate loader for inference.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.tensor_manager.TensorManager.trap" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">trap</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager.trap" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">trap</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.tensor_manager.TensorManager.release_memory" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">release_memory</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager.release_memory" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">release_memory</span><span class="p">()</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.tensor_manager.TensorManager.get_gpu_memory_usage" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">get_gpu_memory_usage</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager.get_gpu_memory_usage" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">get_gpu_memory_usage</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n"><a class="autorefs autorefs-internal" title="            GPUMemoryUsage
+
+
+  
+      dataclass
+   (flextensor.types.GPUMemoryUsage)" href="../configuration/#flextensor.types.GPUMemoryUsage">GPUMemoryUsage</a></span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Get GPU memory usage by FlexTensor in inference mode.</p>
+<p>Returns the memory used by GPU transfer blocks and unmapped tensors
+that were moved to GPU. This method should be called after the manager
+has transitioned to inference mode (after discovery and profiling phases).</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">RETURNS</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>GPUMemoryUsage</code>
+            </td>
+            <td class="doc-returns-details">
+              <div class="doc-md-description">
+                <p>Memory breakdown with per-component bytes and MB values.
+See <code>GPUMemoryUsage</code> for field details.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+                <p>
+                  <span class="doc-returns-annotation">
+                    <b>TYPE:</b>
+                      <code><a class="autorefs autorefs-internal" title="            GPUMemoryUsage
+
+
+  
+      dataclass
+   (flextensor.types.GPUMemoryUsage)" href="../configuration/#flextensor.types.GPUMemoryUsage">GPUMemoryUsage</a></code>
+                  </span>
+                </p>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">RAISES</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+              <span class="doc-raises-annotation">
+                  <code><span title="RuntimeError">RuntimeError</span></code>
+              </span>
+            </td>
+            <td class="doc-raises-details">
+              <div class="doc-md-description">
+                <p>If called before inference mode is initialized
+(tensor_layer_loader is None)</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">tensor_manager</span><span class="o">.</span><span class="n">initialize_inference</span><span class="p">()</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">usage</span> <span class="o">=</span> <span class="n">tensor_manager</span><span class="o">.</span><span class="n">get_gpu_memory_usage</span><span class="p">()</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"GPU blocks: </span><span class="si">{</span><span class="n">usage</span><span class="o">.</span><span class="n">blocks_mb</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> MB"</span><span class="p">)</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Unmapped tensors: </span><span class="si">{</span><span class="n">usage</span><span class="o">.</span><span class="n">unmapped_tensors_mb</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> MB"</span><span class="p">)</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Total: </span><span class="si">{</span><span class="n">usage</span><span class="o">.</span><span class="n">total_mb</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> MB"</span><span class="p">)</span>
+</span></code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.tensor_manager.TensorManager.get_memory_transfer_stats" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">get_memory_transfer_stats</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager.get_memory_transfer_stats" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">get_memory_transfer_stats</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n"><span title="dict">dict</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="n"><span title="float">float</span></span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Get the memory transfer statistics computed during profiling.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">RETURNS</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <span class="doc-returns-annotation">
+                    <code><span title="dict">dict</span>[<span title="int">int</span>, <span title="float">float</span>] | None</code>
+                </span>
+            </td>
+            <td class="doc-returns-details">
+              <div class="doc-md-description">
+                <p>Dictionary mapping <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> size (bytes) to transfer time (ms),</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <span class="doc-returns-annotation">
+                    <code><span title="dict">dict</span>[<span title="int">int</span>, <span title="float">float</span>] | None</code>
+                </span>
+            </td>
+            <td class="doc-returns-details">
+              <div class="doc-md-description">
+                <p>or None if profiling has not yet completed.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.tensor_manager.TensorManager.benchmark_context" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">benchmark_context</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager.benchmark_context" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">benchmark_context</span><span class="p">(</span><span class="n">iterations</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">=</span> <span class="mi">10</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="typing.Any">Any</span></span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Create a benchmarking context that automatically integrates results into TensorManager.</p>
+<p>This method provides a context manager that creates a benchmark instance using the
+configured benchmark_cls, and automatically copies the benchmark results to the
+TensorManager's stats attributes upon context exit.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">PARAMETER</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>iterations</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Number of benchmark iterations to perform</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="int">int</span></code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>10</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">RETURNS</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <span class="doc-returns-annotation">
+                    <code><span title="typing.Any">Any</span></code>
+                </span>
+            </td>
+            <td class="doc-returns-details">
+              <div class="doc-md-description">
+                <p>Context manager that yields the benchmark instance (TensorBenchmarkMode).</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">tensor_manager</span><span class="o">.</span><span class="n">benchmark_context</span><span class="p">()</span> <span class="k">as</span> <span class="n">benchmark</span><span class="p">:</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">... </span>    <span class="n">model</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">layer</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">bfloat16</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">layer</span> <span class="ow">in</span> <span class="n">model</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="c1"># Stats are automatically integrated into tensor_manager</span>
+</span></code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.tensor_manager.TensorManager.run_profile_suite" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">run_profile_suite</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager.run_profile_suite" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">run_profile_suite</span><span class="p">(</span><span class="n">callback</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">direct_mode</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Run all three phases (discovery, profiling, direct_mode) in sequence with a callback.</p>
+<p>This method automates the three-phase process:
+1. Discovery phase: Collects initial <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> statistics
+2. Profile phase: Collects detailed layer statistics with <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> loading
+3. Direct mode phase: Profiles with direct <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> access (if enabled)</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">PARAMETER</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>callback</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Function to call for each phase. Should accept model as argument.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>model</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>The model to prepare</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>None</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>direct_mode</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Whether to enable <abbr title="Trap implementation that patches model parameters in-place instead of intercepting PyTorch operations at dispatch time. Lower overhead than indirect mode.">direct mode</abbr> profiling</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>True</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">RETURNS</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+            </td>
+            <td class="doc-returns-details">
+              <div class="doc-md-description">
+                <p>The inference results</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.tensor_manager.TensorManager.save_profile" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">save_profile</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager.save_profile" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">save_profile</span><span class="p">(</span><span class="n">profile_directory</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Save current profile to directory.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">PARAMETER</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>profile_directory</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Directory to save profile to</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="str">str</span></code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.tensor_manager.TensorManager.load_profile" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">load_profile</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager.load_profile" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">load_profile</span><span class="p">(</span><span class="n">profile_directory</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">model</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Load profile from directory and restore state to model.</p>
+<p>This method loads a saved TensorManagerState and restores it to the manager,
+but does NOT configure loaders or finalize the manager for inference. It only
+sets the internal tensor_manager_state and associates the model.</p>
+<p>After calling this method, you MUST call the following methods in order:</p>
+<ol>
+<li>
+<p>initialize_warmup() - Configures <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> layer loaders via prepare_infer_load_mode()
+   and patches the model with inference traps via prepare_final_model().</p>
+</li>
+<li>
+<p>initialize_profile() - Prepares the model for profiling mode. When a saved state
+   exists, this is a no-op and returns the model as-is. However, if there are changes
+   that require re-profiling, this method handles the profile mode setup.</p>
+</li>
+<li>
+<p>initialize_inference() - Finalizes the manager for inference mode and releases
+   the internal model reference (sets self.model = None) to free memory.</p>
+</li>
+</ol>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+<details class="example" open>
+  <summary><p>Example</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. --></summary>
+  <blockquote>
+<blockquote>
+<blockquote>
+<p>tm = TensorManager(device_gpu="cuda:0", ...)
+tm.load_profile("/path/to/profile", model)
+model = tm.initialize_warmup()  # Required: configures loaders and patches model
+model = tm.initialize_profile()  # Prepares profiling (no-op if state exists)
+model = tm.initialize_inference()  # Releases model reference</p>
+<h4 id="flextensor.tensor_manager.TensorManager.load_profile--now-the-model-is-ready-for-inference">Now the model is ready for inference<a class="headerlink" href="#flextensor.tensor_manager.TensorManager.load_profile--now-the-model-is-ready-for-inference" title="Permanent link">&para;</a></h4>
+</blockquote>
+</blockquote>
+</blockquote>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+</details>
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">PARAMETER</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>profile_directory</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Directory containing the profile.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="str">str</span></code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>model</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Model to restore state to. The model should match the architecture
+used when the profile was originally saved.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+              </p>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary><p>Note</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. --></summary>
+  <p>Future versions may add an optional parameter to automatically run
+finalization (initialize_warmup, initialize_profile, initialize_inference)
+after loading the profile.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.tensor_manager.TensorManager.load_state" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">load_state</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager.load_state" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">load_state</span><span class="p">(</span><span class="n">profile_directory</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">)</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Load profile state from directory without restoring.</p>
+<p>Use this when you need access to the state object before restoring,
+e.g., to read state.gpu_tensors_names or state.view_tensors_names.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">PARAMETER</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>profile_directory</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Directory containing the profile</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="str">str</span></code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">RETURNS</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>TensorManagerState</code>
+            </td>
+            <td class="doc-returns-details">
+              <div class="doc-md-description">
+                <p>The loaded state object</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.tensor_manager.TensorManager.restore_state" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">restore_state</span>
+
+
+<a href="#flextensor.tensor_manager.TensorManager.restore_state" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">restore_state</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">state</span><span class="p">)</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Delegate to TensorManagerStateHandler for state restoration.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div><h2 id="benchmark-modes">Benchmark Modes<a class="headerlink" href="#benchmark-modes" title="Permanent link">&para;</a></h2>
+<p>These are used internally by <code>OffloadManager</code> and exposed for users who need custom benchmark instrumentation.</p>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="flextensor.benchmark_tensor_mode.TensorBenchmarkMode" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">TensorBenchmarkMode</span>
+
+
+<a href="#flextensor.benchmark_tensor_mode.TensorBenchmarkMode" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">TensorBenchmarkMode</span><span class="p">(</span><span class="n">device_gpu</span><span class="p">:</span> <span class="n"><span title="torch.device">device</span></span><span class="p">,</span> <span class="n">pinned_memory</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">iterations</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">=</span> <span class="mi">10</span><span class="p">,</span> <span class="n">pinned_memory_limit_mb</span><span class="p">:</span> <span class="n"><span title="float">float</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="torch.overrides.TorchFunctionMode">TorchFunctionMode</span></code>, <code><span title="abc.ABC">ABC</span></code></p>
+
+
+
+        <p>Abstract base class for <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> benchmarking modes.</p>
+<p>This class defines the common interface that all <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> benchmark implementations
+must follow to be used interchangeably as benchmark_cls parameter in TensorManager.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+        <p>Initialize <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> benchmarking mode.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">PARAMETER</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>device_gpu</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Target GPU device for benchmarking</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="torch.device">device</span></code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>pinned_memory</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Whether to use pinned memory for tensors</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="bool">bool</span></code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>True</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>iterations</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Number of benchmark iterations</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="int">int</span></code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>10</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>pinned_memory_limit_mb</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Maximum size of tensors that will be copied to pinned_memory</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="float">float</span> | None</code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>None</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.benchmark_tensor_mode.TensorBenchmarkMode.get_results" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">get_results</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-abstractmethod"><code>abstractmethod</code></small>
+  </span>
+
+<a href="#flextensor.benchmark_tensor_mode.TensorBenchmarkMode.get_results" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">get_results</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n"><span title="dict">dict</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n"><span title="typing.Any">Any</span></span><span class="p">]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Get benchmark results.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">RETURNS</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <span class="doc-returns-annotation">
+                    <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+                </span>
+            </td>
+            <td class="doc-returns-details">
+              <div class="doc-md-description">
+                <p>Dictionary containing benchmark results with keys:</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <span class="doc-returns-annotation">
+                    <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+                </span>
+            </td>
+            <td class="doc-returns-details">
+              <div class="doc-md-description">
+                <ul>
+<li>tensor_statistics_map: Mapping of <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> IDs to statistics</li>
+</ul>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <span class="doc-returns-annotation">
+                    <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+                </span>
+            </td>
+            <td class="doc-returns-details">
+              <div class="doc-md-description">
+                <ul>
+<li>tensors_map: Mapping of <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> IDs to tensors</li>
+</ul>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="flextensor.benchmark_tensor_mode.BenchmarkReplace" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">BenchmarkReplace</span>
+
+
+<a href="#flextensor.benchmark_tensor_mode.BenchmarkReplace" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">BenchmarkReplace</span><span class="p">(</span><span class="n">device_gpu</span><span class="p">:</span> <span class="n"><span title="torch.device">device</span></span><span class="p">,</span> <span class="n">pinned_memory</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">iterations</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">=</span> <span class="mi">10</span><span class="p">,</span> <span class="n">pinned_memory_limit_mb</span><span class="p">:</span> <span class="n"><span title="float">float</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="            TensorBenchmarkMode (flextensor.benchmark_tensor_mode.TensorBenchmarkMode)" href="#flextensor.benchmark_tensor_mode.TensorBenchmarkMode">TensorBenchmarkMode</a></code></p>
+
+
+
+        <p>Benchmark mode that measures <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> transfer times and collects statistics.</p>
+<p>This implementation intercepts <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> operations, measures transfer times from
+CPU to GPU, and collects comprehensive statistics about <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> usage.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+        <p>Initialize BenchmarkReplace for <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> benchmarking.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">PARAMETER</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>device_gpu</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Target GPU device for benchmarking</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="torch.device">device</span></code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>pinned_memory</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Whether to use pinned memory for tensors</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="bool">bool</span></code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>True</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>iterations</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Number of benchmark iterations</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="int">int</span></code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>10</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>pinned_memory_limit_mb</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Maximum size of tensors that will be copied to pinned_memory</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="float">float</span> | None</code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>None</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.benchmark_tensor_mode.BenchmarkReplace.get_results" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">get_results</span>
+
+
+<a href="#flextensor.benchmark_tensor_mode.BenchmarkReplace.get_results" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">get_results</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n"><span title="dict">dict</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n"><span title="typing.Any">Any</span></span><span class="p">]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Get benchmark results.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">RETURNS</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <span class="doc-returns-annotation">
+                    <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+                </span>
+            </td>
+            <td class="doc-returns-details">
+              <div class="doc-md-description">
+                <p>Dictionary containing benchmark results with keys:</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <span class="doc-returns-annotation">
+                    <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+                </span>
+            </td>
+            <td class="doc-returns-details">
+              <div class="doc-md-description">
+                <ul>
+<li>tensor_statistics_map: Mapping of <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> IDs to statistics</li>
+</ul>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <span class="doc-returns-annotation">
+                    <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+                </span>
+            </td>
+            <td class="doc-returns-details">
+              <div class="doc-md-description">
+                <ul>
+<li>tensors_map: Mapping of <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> IDs to tensors</li>
+</ul>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="flextensor.benchmark_tensor_mode.PreloadToDevice" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">PreloadToDevice</span>
+
+
+<a href="#flextensor.benchmark_tensor_mode.PreloadToDevice" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">PreloadToDevice</span><span class="p">(</span><span class="n">device_gpu</span><span class="p">:</span> <span class="n"><span title="torch.device">device</span></span><span class="p">,</span> <span class="n">pinned_memory</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">iterations</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">=</span> <span class="mi">10</span><span class="p">,</span> <span class="n">pinned_memory_limit_mb</span><span class="p">:</span> <span class="n"><span title="float">float</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="            TensorBenchmarkMode (flextensor.benchmark_tensor_mode.TensorBenchmarkMode)" href="#flextensor.benchmark_tensor_mode.TensorBenchmarkMode">TensorBenchmarkMode</a></code></p>
+
+
+
+        <p>Benchmark mode that immediately transfers tensors to GPU without timing measurements.</p>
+<p>This implementation provides a simple preloading strategy without collecting
+detailed benchmark statistics, suitable for scenarios where you just want
+tensors moved to GPU without measurement overhead.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+        <p>Initialize PreloadToDevice for simple <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> preloading.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">PARAMETER</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>device_gpu</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Target GPU device for preloading</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="torch.device">device</span></code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>pinned_memory</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Whether to use pinned memory for tensors (ignored in this implementation)</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="bool">bool</span></code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>True</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>iterations</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Number of benchmark iterations (ignored in this implementation)</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="int">int</span></code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>10</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>pinned_memory_limit_mb</code>
+            </td>
+            <td class="doc-param-details">
+              <div class="doc-md-description">
+                <p>Maximum size of tensors that will be copied to pinned_memory</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+              <p>
+                  <span class="doc-param-annotation">
+                    <b>TYPE:</b>
+                      <code><span title="float">float</span> | None</code>
+                  </span>
+                  <span class="doc-param-default">
+                    <b>DEFAULT:</b>
+                      <code>None</code>
+                  </span>
+              </p>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="flextensor.benchmark_tensor_mode.PreloadToDevice.get_results" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">get_results</span>
+
+
+<a href="#flextensor.benchmark_tensor_mode.PreloadToDevice.get_results" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">get_results</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n"><span title="dict">dict</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n"><span title="typing.Any">Any</span></span><span class="p">]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Get benchmark results.</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+<table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">RETURNS</span></th>
+          <th><span>DESCRIPTION</span></th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <span class="doc-returns-annotation">
+                    <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+                </span>
+            </td>
+            <td class="doc-returns-details">
+              <div class="doc-md-description">
+                <p>Dictionary containing benchmark results with keys:</p>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <span class="doc-returns-annotation">
+                    <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+                </span>
+            </td>
+            <td class="doc-returns-details">
+              <div class="doc-md-description">
+                <ul>
+<li>tensor_statistics_map: Mapping of <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> IDs to statistics (empty for this implementation)</li>
+</ul>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <span class="doc-returns-annotation">
+                    <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+                </span>
+            </td>
+            <td class="doc-returns-details">
+              <div class="doc-md-description">
+                <ul>
+<li>tensors_map: Mapping of <abbr title="In FlexTensor context, a PyTorch tensor (usually a model parameter or buffer) that can be offloaded between GPU and CPU memory.">tensor</abbr> IDs to tensors</li>
+</ul>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div><!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Auto-appended to every page by pymdownx.snippets for tooltip definitions. -->
+<!-- Keep entries sorted alphabetically. See docs/api/glossary.md for full descriptions. -->
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/ai-dynamo/flextensor" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.expand", "navigation.sections", "navigation.indexes", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+    
+  </body>
+</html>
