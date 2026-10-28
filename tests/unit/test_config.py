@@ -13,11 +13,12 @@ This test suite validates:
 import logging
 import os
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 import flextensor.config as config_module
 from flextensor.config import (
@@ -1714,3 +1715,30 @@ class TestModelCopyPreservesFieldsSet:
         config = OffloadConfig(num_blocks=4, min_blocks=2)
         with pytest.raises(ValidationError):
             config.model_copy(update={"num_blocks": 1, "min_blocks": 8})
+
+    @pytest.mark.parametrize("deep", [False, True])
+    @pytest.mark.parametrize("strategy_type", ["dataclass", "pydantic"])
+    def test_copy_preserves_custom_strategy(self, deep: bool, strategy_type: str) -> None:
+        """A valid strategy must survive updates to unrelated configuration."""
+
+        @dataclass
+        class DataclassStrategy(GreedyStrategy):
+            threshold_mb: float = 0.1
+            n_blocks: int = 4
+            scale: float = 0.7
+
+        class PydanticStrategy(BaseModel, GreedyStrategy):
+            threshold_mb: float = 0.1
+            n_blocks: int = 4
+            scale: float = 0.7
+
+        strategy_class = DataclassStrategy if strategy_type == "dataclass" else PydanticStrategy
+        strategy = strategy_class()
+        config = OffloadConfig(load_strategy=strategy)
+
+        copied = config.model_copy(update={"profiling_iters": 3}, deep=deep)
+
+        assert isinstance(copied.load_strategy, strategy_class)
+        assert copied.load_strategy.scale == 0.7
+        assert (copied.load_strategy is strategy) is not deep
+        assert copied.profiling_iters == 3

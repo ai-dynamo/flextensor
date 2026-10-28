@@ -519,7 +519,8 @@ class OffloadConfig(BaseModel):
 
         validated_update = self._reject_removed_fields(dict(update))  # type: ignore[operator]
         copied = super().model_copy(update=validated_update, deep=deep)
-        revalidated = type(self).model_validate(copied.model_dump())
+        # Revalidate field values without serializing custom strategy objects.
+        revalidated = type(self).model_validate(dict(copied))
         object.__setattr__(revalidated, "__pydantic_fields_set__", set(copied.model_fields_set))
         return revalidated
 

@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve custom dataclass and Pydantic strategy instances when copying
+  `OffloadConfig` with updated settings, including shallow/deep copy semantics.
+
 
 ## [0.5.0] — 2026-10-12
 
